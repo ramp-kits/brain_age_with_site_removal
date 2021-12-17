@@ -1,0 +1,35 @@
+name: "TESTING CONDA"
+
+on:
+  push:
+    branches:
+      - "*"
+  pull_request:
+    branches:
+      - "*"
+
+jobs:
+  build_conda:
+    name: Linux Conda
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Set up Python via Conda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          activate-environment: anaconda-client-env
+          environment-file: environment.yml
+          python-version: 3.8
+          auto-activate-base: false
+      - name: Info Conda
+        run: |
+          conda info
+          conda list
+      - name: Test
+        run: |
+          python download_data.py --test
+          ramp-test --quick-test

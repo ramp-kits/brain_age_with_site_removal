@@ -1,2 +1,26 @@
-# brain_age_with_site_removal
-Age prediction with site-effect removal: A challenge on the openBHB dataset that aims to i) predict age from derived 3D T1w anatomical MRI data while ii) removing site/scanner information from the learned representation.
+![Pep8](https://github.com/ramp-kits/brain_age_with_site_removal/actions/workflows/pep8.yml/badge.svg)
+![Testing Conda](https://github.com/ramp-kits/brain_age_with_site_removal/actions/workflows/testing_conda.yml/badge.svg)
+![Testing Pip](https://github.com/ramp-kits/brain_age_with_site_removal/actions/workflows/testing_pip.yml/badge.svg)
+![Testing Notebook](https://github.com/ramp-kits/brain_age_with_site_removal/actions/workflows/testing_notebook.yml/badge.svg)
+
+![Challenge](https://baobablab.github.io/bhb/images/resources/age_prediction_with_site_removal.jpg)
+
+# Brain age prediction with site-effect removal
+
+The [challenge](https://baobablab.github.io/bhb/challenges/age_prediction_with_site_removal) uses the openBHB dataset and aims to i) predict age from derived data from 3D T1 anatomical MRI while ii) removing site information from the learned representation. Thus, we aim to compare the capacity of proposed models to encode a relevant representation of the data (feature extraction and dimensionality reduction) that preserve the biological variability associated with age while removing the site-specific information. The algorithms submitted must output a low-dimension features vector (p < 10000). Derived data are composed of Quasi-Raw, VBM, and SBM.
+
+## A big data challenge
+
+[OpenBHB](https://baobablab.github.io/bhb/dataset#healthy-controls-datasets) aggregates 10 publicly available datasets. Currently, openBHB is focused only on Healthy Controls (HC) since the main challenge consists in modeling the (normal) brain development by building a robust brain age predictor. OpenBHB contains $N=5330$ brain MRI scans from HC acquired on 71 different acquisition sites coming from European-American, European, and Asian individuals, promoting more diversity in openBHB. To manage redundant images, one session per participant has been retained along with its best-associated run, selected according to image quality. We also provide the participants phenotype as well as site and scanner information associated with each image, which essentially includes age, sex, acquisition site, diagnosis (in our case only HC), MRI scanner magnetic field, and MRI scanner settings identifier (a combination of multiple information composed of a subset of the repetition time, echo time, sequence name, flip angle, and acquisition coil). Some widespread confounds are also proposed, such as the Total Intracranial Volume (TIV), the CerebroSpinal Fluid Volume (CSFV), the Gray Matter Volume (GMV), and the White Matter Volume (WMV).
+
+![Population Statistics](https://baobablab.github.io/bhb/images/resources/population.png)
+
+## Multi-modal imaging data
+
+For the moment only features derived from T1w images are available comprising Quasi-Raw, CAT12 VBM, and FreeSurfer. All data are [preprocessed uniformly](https://baobablab.github.io/bhb/dataset#pre-processed-datasets) including a semi-automatic Quality Controls (QC) guided with quality metrics.
+
+![BrainPrep preprocessings](https://baobablab.github.io/bhb/images/resources/preproc.png)
+
+## Coding framework, for competition and collaboration
+
+The challenge will be carried out on the [RAMP platform](https://ramp.studio). It enables competition and collaboration on data-science problems, using the Python language. To start "hacking", a [starting kit](https://github.com/ramp-kits/brain_age_with_site_removal/brain_age_with_site_removal_starting_kit.ipynb) is available. It provides a simple working example which can be expanded to more advanced solutions.

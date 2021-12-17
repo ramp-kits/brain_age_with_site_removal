@@ -1,0 +1,12 @@
+numpy
+scipy
+nibabel
+pandas>=0.21
+scikit-learn>=0.19
+nilearn
+matplotlib
+seaborn
+jupyter
+progressbar2
+torch
+ramp-workflow
