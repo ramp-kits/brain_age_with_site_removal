@@ -484,7 +484,7 @@ class RegressionModel(metaclass=ABCMeta):
     __metadata_local_weights__ = os.path.join(
         os.path.dirname(__file__), "metadata.pkl")
 
-    def __init__(self, model, batch_size=25, transforms=None):
+    def __init__(self, model, batch_size=15, transforms=None):
         """ Init class.
 
         Parameters
