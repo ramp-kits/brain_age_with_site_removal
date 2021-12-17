@@ -25,4 +25,4 @@ jobs:
         pip install flake8 nbconvert[test]
     - name: Check Python syntax
       run: |
-        flake8 *.py submissions/*/*.py
+        flake8 --ignore E722,W503,W504 *.py submissions/*/*.py

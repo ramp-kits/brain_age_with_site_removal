@@ -188,8 +188,8 @@ class Normalize(object):
         self.eps = eps
 
     def __call__(self, X):
-        _X = (self.std * (X - np.mean(X)) / (np.std(X) + self.eps) +
-              self.mean)
+        _X = (
+            self.std * (X - np.mean(X)) / (np.std(X) + self.eps) + self.mean)
         return _X
 
 
@@ -323,7 +323,7 @@ class DenseNet(nn.Module):
                                     num_output_features=(num_features // 2))
                 self.features.add_module("transition%d" % (i + 1), trans)
                 num_features = num_features // 2
-            if out_block == "block%i" % (i+1):
+            if out_block == "block%i" % (i + 1):
                 break
         self.num_features = num_features
         if out_block is None:

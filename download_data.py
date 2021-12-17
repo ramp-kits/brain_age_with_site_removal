@@ -102,9 +102,8 @@ if __name__ == "__main__":
         generate_random_data(rootdir=PATH_DATA, dtype="private_test",
                              n_samples=10)
     else:
-        fetch_data(basenames=[
-                        "train.npy", "train.tsv", "test.npy", "test.tsv",
-                        "private_test.npy", "private_test.tsv"],
+        fetch_data(basenames=["train.npy", "train.tsv", "test.npy", "test.tsv",
+                              "private_test.npy", "private_test.tsv"],
                    rootdir=PATH_DATA,
                    base_url=("ftp://ftp.cea.fr/pub/unati/share/OpenBHB"),
                    verbose=1)

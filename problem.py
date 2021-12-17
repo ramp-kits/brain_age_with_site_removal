@@ -255,8 +255,9 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
                 predictions_combined.predictions_list):
             scores[score_type.name] = score_type.score_function(
                 ground_truths, predictions, valid_indexes)
-        metric = (scores["mae_private_age"] * scores["bacc_site"] +
-                  (1. / self.n_sites) * scores["mae_age"])
+        metric = (
+            scores["mae_private_age"] * scores["bacc_site"] +
+            (1. / self.n_sites) * scores["mae_age"])
         return metric
 
     def __call__(self, y_true, y_pred):
