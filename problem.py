@@ -210,6 +210,23 @@ class MAE(rw.score_types.BaseScoreType):
         return mean_absolute_error(y_true, y_pred)
 
 
+class ExtMAE(rw.score_types.BaseScoreType):
+    """ Compute mean absolute error on the private external test set.
+    """
+    is_lower_the_better = True
+    minimum = 0.0
+    maximum = float("inf")
+
+    def __init__(self, memory, name="mae", precision=2):
+        self.memory = memory
+        self.name = name
+        self.precision = precision
+
+    def __call__(self, y_true, y_pred):
+        return mean_absolute_error(self.memory["y_true"],
+                                   self.memory["y_pred"])
+
+
 class BACC(rw.score_types.classifier_base.ClassifierBaseScoreType):
     """ Compute balanced accuracy, which avoids inflated performance
     estimates on imbalanced datasets.
@@ -342,6 +359,8 @@ score_type_mae_age = MAE(name="mae_age", precision=3)
 score_type_rmse_age = rw.score_types.RMSE(name="rmse_age", precision=3)
 score_type_acc_site = rw.score_types.Accuracy(name="acc_site", precision=3)
 score_type_bacc_site = BACC(name="bacc_site", precision=3)
+score_type_ext_mae_age = ExtMAE(memory=private_mae_memory, name="ext_mae_age",
+                                precision=3)
 score_types = [
     DeepDebiasingMetric(
         name="challenge_metric", precision=3,
@@ -351,7 +370,8 @@ score_types = [
     rw.score_types.MakeCombined(score_type=score_type_mae_age, index=0),
     rw.score_types.MakeCombined(score_type=score_type_rmse_age, index=0),
     rw.score_types.MakeCombined(score_type=score_type_acc_site, index=1),
-    rw.score_types.MakeCombined(score_type=score_type_bacc_site, index=1)
+    rw.score_types.MakeCombined(score_type=score_type_bacc_site, index=1),
+    rw.score_types.MakeCombined(score_type=score_type_ext_mae_age, index=0)
 ]
 workflow = DeepDebiasingEstimator(
     memory=private_mae_memory, filename="estimator.py",
