@@ -347,9 +347,10 @@ problem_title = (
     "through representation learning.")
 # _, y = get_train_data()
 # _prediction_site_names = sorted(np.unique(y[:, 1]))
-# TODO: switch labels manually if using the test set in prod
-# _prediction_site_names = [0, 1]
-_prediction_site_names = list(range(64))
+# TODO: switch labels manually in prod (configured to wotk with CI in test
+# mode)
+_prediction_site_names = [0, 1]
+# _prediction_site_names = list(range(64))
 _target_column_names = ["age", "site"]
 private_mae_memory = {}
 Predictions_age = rw.prediction_types.make_regression(
