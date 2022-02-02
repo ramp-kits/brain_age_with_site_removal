@@ -129,6 +129,7 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
         print("- y site:", y_site_pred.shape)
         print("- y age:", y_age_pred.shape)
         if len(self.memory) == 0:
+            # TODO: set absolute path to the data in prod.
             private_X, private_y = get_private_test_data()
             private_y_age = private_y[:, 0].astype(float)
             self.memory.update({
@@ -344,8 +345,12 @@ def get_private_test_data(path="."):
 problem_title = (
     "Brain age prediction and debiasing with site-effect removal in MRI "
     "through representation learning.")
-_, y = get_train_data()
-_prediction_site_names = sorted(np.unique(y[:, 1]))
+# _, y = get_train_data()
+# _prediction_site_names = sorted(np.unique(y[:, 1]))
+# TODO: switch labels manually in prod (configured to wotk with CI in test
+# mode)
+_prediction_site_names = [0, 1]
+# _prediction_site_names = list(range(64))
 _target_column_names = ["age", "site"]
 private_mae_memory = {}
 Predictions_age = rw.prediction_types.make_regression(

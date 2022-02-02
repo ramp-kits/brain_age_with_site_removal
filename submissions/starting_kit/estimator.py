@@ -62,12 +62,12 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
     MASKS = {
         "vbm": {
             "path": os.path.join(
-                os.path.dirname(__file__),
+                os.path.dirname(os.path.dirname(__file__)),
                 "cat12vbm_space-MNI152_desc-gm_TPM.nii.gz"),
             "thr": 0.05},
         "quasiraw": {
             "path": os.path.join(
-                os.path.dirname(__file__),
+                os.path.dirname(os.path.dirname(__file__)),
                 "quasiraw_space-MNI152_desc-brain_T1w.nii.gz"),
             "thr": 0}
     }
