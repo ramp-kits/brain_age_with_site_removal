@@ -58,12 +58,16 @@ def fetch_data(basenames, rootdir, base_url, verbose=1):
 def generate_random_data(rootdir, dtype, n_samples):
     """ Generate random data.
 
+    The test set is composed of data with the same sites as in the
+    train set and data with unssen sites during the training.
+    The first line contains the split index and nans.
+
     Parameters
     ----------
     rootdir: str
         the data location.
     dtype: str
-        the datasset type: 'train', 'test', or 'private_test'.
+        the datasset type: 'train' or'test'.
     n_samples: int
         the number of generated samples.
 
@@ -71,19 +75,37 @@ def generate_random_data(rootdir, dtype, n_samples):
     -------
     x_arr: array (n_samples, n_features)
         input data.
-    y_arr: array (n_samples, )
+    y_arr: array (n_samples, 2)
         target data.
     """
-    x_arr = np.random.rand(n_samples, 2348836)
-    df = pd.DataFrame(data=range(n_samples), columns=["samples"])
-    df["age"] = np.random.randint(5, 80, n_samples)
-    if dtype == "private_test":
-        df["site"] = ""
+    x_arrs, y_arrs = [], []
+    if dtype == "test":
+        dtypes = ["test", "private_test"]
     else:
-        df["site"] = np.random.randint(0, 2, n_samples)
+        dtypes = [dtype]
+    for name in dtypes:
+        x_arr = np.random.rand(n_samples, 2348836)
+        df = pd.DataFrame(data=range(n_samples), columns=["samples"])
+        df["age"] = np.random.randint(5, 80, n_samples)
+        if name == "private_test":
+            df["site"] = ""
+        else:
+            df["site"] = np.random.randint(0, 2, n_samples)
+        y_arr = df[["age", "site"]].values
+        x_arrs.append(x_arr)
+        y_arrs.append(y_arr)
+    header = np.empty((1, x_arrs[0].shape[1]))
+    header[:] = np.nan
+    header[0, 0] = len(x_arrs[0])
+    x_arrs.insert(0, header)
+    header = np.empty((1, y_arrs[0].shape[1]))
+    header[:] = len(y_arrs[0])
+    y_arrs.insert(0, header)
+    x_arr = np.concatenate(x_arrs, axis=0)
+    y_arr = np.concatenate(y_arrs, axis=0)
+    df = pd.DataFrame(y_arr, columns=("age", "site"))
     np.save(os.path.join(rootdir, dtype + ".npy"), x_arr.astype(np.float32))
     df.to_csv(os.path.join(rootdir, dtype + ".tsv"), sep="\t", index=False)
-    y_arr = df[["age", "site"]].values
     return x_arr, y_arr
 
 
@@ -97,13 +119,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.test:
-        generate_random_data(rootdir=PATH_DATA, dtype="train", n_samples=20)
+        generate_random_data(rootdir=PATH_DATA, dtype="train", n_samples=30)
         generate_random_data(rootdir=PATH_DATA, dtype="test", n_samples=10)
-        generate_random_data(rootdir=PATH_DATA, dtype="private_test",
-                             n_samples=10)
     else:
-        fetch_data(basenames=["train.npy", "train.tsv", "test.npy", "test.tsv",
-                              "private_test.npy", "private_test.tsv"],
+        fetch_data(basenames=["train.npy", "train.tsv", "test.npy",
+                              "test.tsv"],
                    rootdir=PATH_DATA,
                    base_url=("ftp://ftp.cea.fr/pub/unati/share/OpenBHB"),
                    verbose=1)
