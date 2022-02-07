@@ -38,6 +38,38 @@ import torch.utils.checkpoint as cp
 # Define here some selectors
 ############################################################################
 
+class BHBDataset(object):
+    """ Simple structure that deals with the data strucutre, ie. the first
+    line contains the header, ie the size of the internal dataset
+    and is used to split the internal & external test sets.
+    """
+    def __init__(self, data=None, data_loader=None):
+        if data is not None:
+            self.X, self.y = data
+        elif data_loader is not None:
+            self.X, self.y = data_loader()
+        else:
+            raise ValueError("You need to specify the data (X, y) or a "
+                             "callable that returnes these data.")
+        self.internal_idx = int(self.X[0, 0])
+        if len(self.X) == (self.internal_idx + 1):
+            self.dtype = "train"
+        else:
+            self.dtype = "test"
+
+    def get_data(self, dtype="internal"):
+        if dtype not in ("internal", "external"):
+            raise ValueError("The dataset is either internal or external.")
+        if self.dtype == "train" and dtype == "external":
+            raise ValueError("The train set is composed only of an internal "
+                             "set.")
+        if dtype == "internal":
+            indices = slice(1, self.internal_idx + 1, None)
+        else:
+            indices = slice(self.internal_idx + 1, None, None)
+        return self.X[indices], self.y[indices]
+
+
 class FeatureExtractor(BaseEstimator, TransformerMixin):
     """ Select only the requested data associatedd features from the the
     input buffered data.
@@ -61,14 +93,10 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
     ])
     MASKS = {
         "vbm": {
-            "path": os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                "cat12vbm_space-MNI152_desc-gm_TPM.nii.gz"),
+            "path": None,
             "thr": 0.05},
         "quasiraw": {
-            "path": os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                "quasiraw_space-MNI152_desc-brain_T1w.nii.gz"),
+            "path": None,
             "thr": 0}
     }
 
@@ -94,7 +122,12 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self.stop = cumsum[index]
         self.masks = dict((key, val["path"])
                           for key, val in self.MASKS.items())
+        self.masks["vbm"] = os.environ.get("VBM_MASK")
+        self.masks["quasiraw"] = os.environ.get("QUASIRAW_MASK")
         for key in self.masks:
+            if self.masks[key] is None or not os.path.isfile(self.masks[key]):
+                raise ValueError("Impossible to find mask:", key,
+                                 self.masks[key])
             arr = nibabel.load(self.masks[key]).get_fdata()
             thr = self.MASKS[key]["thr"]
             arr[arr <= thr] = 0
