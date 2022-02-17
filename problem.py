@@ -13,13 +13,19 @@ This parametrizes the setup using building blocks from RAMP workflow.
 """
 
 import os
+import json
+import copy
+import tempfile
 import pandas as pd
 import numpy as np
 import rampwf as rw
+import nibabel
+from nilearn import plotting, datasets
 from rampwf.utils.pretty_print import print_title
 from sklearn.base import BaseEstimator
 from sklearn.utils import _safe_indexing
 from sklearn.model_selection import KFold
+from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import (
@@ -36,10 +42,11 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
     The training is not performed on the server side. Weights are required at
     the submission time and fold indices are tracked at training time.
     """
-    def __init__(self, filename="estimator.py", additional_filenames=None,
-                 max_n_features=10000):
+    def __init__(self, site_encoder, filename="estimator.py",
+                 additional_filenames=None, max_n_features=10000):
         super().__init__(filename, additional_filenames)
         self.max_n_features = max_n_features
+        self.site_encoder = site_encoder
 
     def train_submission(self, module_path, X, y, train_idx=None):
         """ Train the estimator of a given submission.
@@ -71,10 +78,10 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
             sanitize=True
         )
         os.environ["VBM_MASK"] = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
+            os.path.dirname(__file__),
             "cat12vbm_space-MNI152_desc-gm_TPM.nii.gz")
         os.environ["QUASIRAW_MASK"] = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
+            os.path.dirname(__file__),
             "quasiraw_space-MNI152_desc-brain_T1w.nii.gz")
         estimator = submission_module.get_estimator()
         y_train = _safe_indexing(y, _train_idx)
@@ -101,8 +108,9 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
                 "({0}).".format(self.max_n_features))
         print("- features:", features.shape)
         print_title("Estimates sites from features...")
+        self.site_encoder.fit(y_site)
         site_estimator = SiteEstimator()
-        site_estimator.fit(features, y_site)
+        site_estimator.fit(features, self.site_encoder.transform(y_site))
         print_title("Estimates age from features...")
         age_estimator = AgeEstimator()
         age_estimator.fit(features, y_age)
@@ -202,7 +210,7 @@ class R2(rw.score_types.BaseScoreType):
     minimum = -float("inf")
     maximum = 1
 
-    def __init__(self, name="mae", precision=2):
+    def __init__(self, name="r2", precision=2):
         self.name = name
         self.precision = precision
 
@@ -259,7 +267,20 @@ class ExtMAE(rw.score_types.BaseScoreType):
         return mean_absolute_error(y_true_external, y_pred_external)
 
 
-class BACC(rw.score_types.classifier_base.ClassifierBaseScoreType):
+class ClassifierBaseScoreType(rw.score_types.base.BaseScoreType):
+    def score_function(self, ground_truths, predictions, valid_indexes=None):
+        self.label_names = ground_truths.label_names
+        if valid_indexes is None:
+            valid_indexes = slice(None, None, None)
+        elif -1 in predictions.y_pred_label_index and all(valid_indexes[1:]):
+            valid_indexes[0] = True
+        y_pred_label_index = predictions.y_pred_label_index[valid_indexes]
+        y_true_label_index = ground_truths.y_pred_label_index[valid_indexes]
+        self.check_y_pred_dimensions(y_true_label_index, y_pred_label_index)
+        return self.__call__(y_true_label_index, y_pred_label_index)
+
+
+class BACC(ClassifierBaseScoreType):
     """ Compute balanced accuracy, which avoids inflated performance
     estimates on imbalanced datasets.
     """
@@ -267,9 +288,10 @@ class BACC(rw.score_types.classifier_base.ClassifierBaseScoreType):
     minimum = 0.0
     maximum = 1.0
 
-    def __init__(self, name="bacc", precision=2):
+    def __init__(self, site_encoder, name="bacc", precision=2):
         self.name = name
         self.precision = precision
+        self.site_encoder = site_encoder
 
     def __call__(self, y_true_label_index, y_pred_label_index):
         is_test_set = (-1 in y_pred_label_index)
@@ -279,19 +301,21 @@ class BACC(rw.score_types.classifier_base.ClassifierBaseScoreType):
                                                split_idx)
             y_pred_label_index, _ = split_data(y_pred_label_index[1:],
                                                split_idx)
+        y_true_label_index = self.site_encoder.transform(y_true_label_index)
         return balanced_accuracy_score(y_true_label_index, y_pred_label_index)
 
 
-class Accuracy(rw.score_types.classifier_base.ClassifierBaseScoreType):
+class Accuracy(ClassifierBaseScoreType):
     """ Compute accuracy.
     """
     is_lower_the_better = False
     minimum = 0.0
     maximum = 1.0
 
-    def __init__(self, name="accuracy", precision=2):
+    def __init__(self, site_encoder, name="accuracy", precision=2):
         self.name = name
         self.precision = precision
+        self.site_encoder = site_encoder
 
     def __call__(self, y_true_label_index, y_pred_label_index):
         is_test_set = (-1 in y_pred_label_index)
@@ -301,6 +325,7 @@ class Accuracy(rw.score_types.classifier_base.ClassifierBaseScoreType):
                                                split_idx)
             y_pred_label_index, _ = split_data(y_pred_label_index[1:],
                                                split_idx)
+        y_true_label_index = self.site_encoder.transform(y_true_label_index)
         return accuracy_score(y_true_label_index, y_pred_label_index)
 
 
@@ -348,6 +373,8 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
                 self.score_types,
                 ground_truths_combined.predictions_list,
                 predictions_combined.predictions_list):
+            ground_truths = copy.deepcopy(ground_truths)
+            predictions = copy.deepcopy(predictions)
             _predictions = predictions.y_pred
             _ground_truths = ground_truths.y_pred
             if _predictions.ndim == 1:
@@ -370,9 +397,11 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
                     scores[self.score_type_mae_private_age.name] = (
                         self.score_type_mae_private_age(
                             external_ground_truths, external_predictions))
-                if valid_indexes is None:
+                if (valid_indexes is None or
+                        len(valid_indexes) != len(internal_ground_truths) + 1):
                     ground_truths.y_pred = internal_ground_truths
                     predictions.y_pred = internal_predictions
+                    valid_indexes = None
                 else:
                     ground_truths.y_pred = np.concatenate(
                         (_ground_truths[:1], internal_ground_truths), axis=0)
@@ -427,8 +456,18 @@ def _read_data(path, dataset):
     """
     df = pd.read_csv(os.path.join(path, "data", dataset + ".tsv"), sep="\t")
     y_arr = df[["age", "site"]].values
+    split_data = df["split"].values.tolist()
+    key = "internal_" + dataset
+    split_data.reverse()
+    split_index = len(split_data) - split_data.index(key)
+    header = np.empty((1, y_arr.shape[1]))
+    header[:] = split_index
+    y_arr = np.concatenate([header, y_arr], axis=0)
     x_arr = np.load(os.path.join(path, "data", dataset + ".npy"),
                     mmap_mode="r")
+    flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_SMALL")
+    if flag is not None and flag == "on":
+        raise NotImplementedError
     return x_arr, y_arr
 
 
@@ -512,13 +551,13 @@ def make_multiclass(label_names=[]):
 problem_title = (
     "Brain age prediction and debiasing with site-effect removal in MRI "
     "through representation learning.")
-# _, y = get_train_data()
-# _prediction_site_names = sorted(np.unique(y[:, 1]))
-# TODO: switch labels manually in prod (configured to wotk with CI in test
-# mode)
-_prediction_site_names = [0, 1]
-# _prediction_site_names = list(range(64))
+flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
+if flag is not None and flag == "on":
+    _prediction_site_names = [0, 1]
+else:
+    _prediction_site_names = list(range(64))
 _target_column_names = ["age", "site"]
+site_encoder = LabelEncoder()
 Predictions_age = rw.prediction_types.make_regression(
     label_names=[_target_column_names[0]])
 Predictions_site = make_multiclass(
@@ -528,8 +567,8 @@ Predictions = rw.prediction_types.make_combined(
 score_type_r2_age = R2(name="r2_age", precision=3)
 score_type_mae_age = MAE(name="mae_age", precision=3)
 score_type_rmse_age = RMSE(name="rmse_age", precision=3)
-score_type_acc_site = Accuracy(name="acc_site", precision=3)
-score_type_bacc_site = BACC(name="bacc_site", precision=3)
+score_type_acc_site = Accuracy(site_encoder, name="acc_site", precision=3)
+score_type_bacc_site = BACC(site_encoder, name="bacc_site", precision=3)
 score_type_ext_mae_age = ExtMAE(name="ext_mae_age", precision=3)
 
 score_types = [
@@ -545,5 +584,95 @@ score_types = [
     rw.score_types.MakeCombined(score_type=score_type_ext_mae_age, index=0)
 ]
 workflow = DeepDebiasingEstimator(
-    filename="estimator.py",
+    site_encoder, filename="estimator.py",
     additional_filenames=["weights.pth", "metadata.pkl"])
+
+
+class DatasetHelper(object):
+    """ Simple structure that deals with the data strucutre, ie. the first
+    line contains the header, ie. the size of the internal dataset
+    and is used to split the internal & external test sets.
+    """
+    def __init__(self, data=None, data_loader=None):
+        if data is not None:
+            self.X, self.y = data
+        elif data_loader is not None:
+            self.X, self.y = data_loader()
+        else:
+            raise ValueError("You need to specify the data (X, y) or a "
+                             "callable that returnes these data.")
+        self.internal_idx = int(self.X[0, 0])
+        if len(self.X) == (self.internal_idx + 1):
+            self.dtype = "train"
+        else:
+            self.dtype = "test"
+        self.indices = None
+        resource_file = os.path.join(os.path.dirname(__file__),
+                                     "resources.json")
+        with open(resource_file, "rt") as of:
+            self.resources = json.load(of)
+
+    def get_data(self, dtype="internal"):
+        if dtype not in ("internal", "external"):
+            raise ValueError("The dataset is either internal or external.")
+        if self.dtype == "train" and dtype == "external":
+            raise ValueError("The train set is composed only of an internal "
+                             "set.")
+        if dtype == "internal":
+            self.indices = slice(1, self.internal_idx + 1, None)
+        else:
+            self.indices = slice(self.internal_idx + 1, None, None)
+        return self.X[self.indices], self.y[self.indices]
+
+    def get_channels_info(self, data):
+        dtype = self._get_dtype(data.shape)
+        return pd.DataFrame(self.resources[dtype]["channels"],
+                            columns=("channels", ))
+
+    def labels_to_dataframe(self):
+        if self.indices is None:
+            raise ValueError("First you need to call the `get_data` function.")
+        y_df = pd.DataFrame(self.y[self.indices], columns=("age", "site"))
+        y_df = y_df.astype({"age": float, "site": int})
+        return y_df
+
+    def data_to_dataframe(self, data, channel_id):
+        dtype = self._get_dtype(data.shape)
+        features = self.resources[dtype]["features"]
+        x_df = None
+        print(data.shape)
+        if features is not None:
+            x_df = pd.DataFrame(data[:, channel_id], columns=features)
+        return x_df
+
+    def plot_data(self, data, sample_id, channel_id, hemi="left"):
+        dtype = self._get_dtype(data.shape)
+        if dtype in ("vbm", "quasiraw"):
+            im = nibabel.Nifti1Image(data[sample_id, channel_id],
+                                     affine=np.eye(4))
+            plotting.plot_anat(im, title=dtype)
+        elif dtype in ("xhemi", ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                fsaverage = datasets.fetch_surf_fsaverage(
+                    mesh="fsaverage7", data_dir=tmpdir)
+                surf = data[sample_id, channel_id]
+                plotting.plot_surf_stat_map(
+                    fsaverage["infl_{0}".format(hemi)], stat_map=surf,
+                    hemi=hemi, view="lateral",
+                    bg_map=fsaverage["sulc_{0}".format(hemi)],
+                    bg_on_data=True, darkness=.5, cmap="jet", colorbar=False)
+        else:
+            raise ValueError("View not implemented for '{0}'.".format(dtype))
+
+    def _get_dtype(self, shape):
+        shape = list(shape)
+        shape[0] = -1
+        dtype = None
+        for key, struct in self.resources.items():
+            if shape == struct["shape"]:
+                dtype = key
+                break
+        if dtype is None:
+            raise ValueError("The input data does not correspond to a valid "
+                             "dataset.")
+        return dtype

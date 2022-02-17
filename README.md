@@ -24,3 +24,10 @@ For the moment only features derived from T1w images are available comprising Qu
 ## Coding framework, for competition and collaboration
 
 The challenge will be carried out on the [RAMP platform](https://ramp.studio). It enables competition and collaboration on data-science problems, using the Python language. To start "hacking", a [starting kit](https://github.com/ramp-kits/brain_age_with_site_removal/brain_age_with_site_removal_starting_kit.ipynb) is available. It provides a simple working example which can be expanded to more advanced solutions.
+
+## For developers
+
+The behaviour of the code can be controlled from three environment variables:
+
+- RAMP_BRAIN_AGE_SITERM_TEST: set this environment varaible to 'on' in order to work on the test dataset. Under the hood, it will select the appropriate target labels and use a KFold cross-validation.
+- RAMP_BRAIN_AGE_SITERM_SMALL: set this environment varaible to 'on' in order to select a small part of the dataset. This option is usefull when testing the challenge on the server side.
