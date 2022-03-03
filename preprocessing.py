@@ -13,6 +13,7 @@ from collections import OrderedDict
 import pandas as pd
 import numpy as np
 import nibabel
+from sklearn.preprocessing import LabelEncoder
 from nilearn.masking import apply_mask
 
 
@@ -25,6 +26,10 @@ MODALITITES = OrderedDict([
         "pattern": "sub-{0}_preproc-quasiraw_T1w.npy",
         "shape": (-1, 1, 182, 218, 182),
         "size": 1827095}),
+    ("xhemi", {
+        "pattern": "sub-{0}_preproc-freesurfer_desc-xhemi_T1w.npy",
+        "shape": (-1, 8, 163842),
+        "size": 1310736}),
     ("vbm_roi", {
         "pattern": "sub-{0}_preproc-cat12vbm_desc-gm_ROI.npy",
         "shape": (-1, 1, 284),
@@ -36,11 +41,7 @@ MODALITITES = OrderedDict([
     ("destrieux_roi", {
         "pattern": "sub-{0}_preproc-freesurfer_desc-destrieux_ROI.npy",
         "shape": (-1, 7, 148),
-        "size": 1036}),
-    ("xhemi", {
-        "pattern": "sub-{0}_preproc-freesurfer_desc-xhemi_T1w.npy",
-        "shape": (-1, 8, 163842),
-        "size": 1310736})
+        "size": 1036})
 ])
 
 MASKS = {
@@ -249,6 +250,28 @@ def convert_split(rootdir, name):
             print(fold_name, set_name, len(subjects))
 
 
+def reindex_sites(rootdir):
+    """ Reindex site ids using contiguous indices.
+
+    Parameters
+    ----------
+    rootdir: str
+        root directory.
+    """
+    df_train = pd.read_csv(os.path.join(rootdir, "train.tsv"), sep="\t")
+    df_test = pd.read_csv(os.path.join(rootdir, "test.tsv"), sep="\t")
+    site_encoder = LabelEncoder()
+    sites = df_train.site.values.astype(int)
+    site_encoder.fit(sites)
+    df_train.site = site_encoder.transform(sites)
+    sites = df_test[df_test["split"] == "internal_test"].site.values.astype(int)
+    df_test.loc[df_test["split"] == "internal_test", "site"] = (
+        site_encoder.transform(sites))
+    df_test.loc[df_test["split"] == "external_test", "site"] = np.nan
+    df_train.to_csv(os.path.join(rootdir, "train_.tsv"), sep="\t", index=False)
+    df_test.to_csv(os.path.join(rootdir, "test_.tsv"), sep="\t", index=False)
+
+
 if __name__ == "__main__":
 
     # organize_data(rootdir="/neurospin/hc")
@@ -258,9 +281,11 @@ if __name__ == "__main__":
     #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge")
     # compile_resources(
     #     rootdir="/neurospin/hc/openBHB/resource")
-    convert_split(
-        rootdir="/neurospin/hc/challengeBHB/public_data_challenge",
-        name="public_cv_split")
-    convert_split(
-        rootdir="/neurospin/hc/challengeBHB/private_data_challenge",
-        name="private__cv_split")
+    #convert_split(
+    #    rootdir="/neurospin/hc/challengeBHB/public_data_challenge",
+    #    name="public_cv_split")
+    #convert_split(
+    #    rootdir="/neurospin/hc/challengeBHB/private_data_challenge",
+    #    name="private__cv_split")
+    reindex_sites(
+        rootdir="/neurospin/hc/challengeBHB/public_data_challenge")

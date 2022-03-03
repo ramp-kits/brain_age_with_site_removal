@@ -50,6 +50,9 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         ("quasiraw", {
             "shape": (-1, 1, 182, 218, 182),
             "size": 1827095}),
+        ("xhemi", {
+            "shape": (-1, 8, 163842),
+            "size": 1310736}),
         ("vbm_roi", {
             "shape": (-1, 1, 284),
             "size": 284}),
@@ -58,10 +61,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             "size": 476}),
         ("destrieux_roi", {
             "shape": (-1, 7, 148),
-            "size": 1036}),
-        ("xhemi", {
-            "shape": (-1, 8, 163842),
-            "size": 1310736})
+            "size": 1036})
     ])
     MASKS = {
         "vbm": {
@@ -114,6 +114,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         if self.dtype in ("vbm", "quasiraw"):
             im = unmask(select_X, self.masks[self.dtype])
             select_X = im.get_fdata()
+            select_X = select_X.transpose(3, 0, 1, 2)
         select_X = select_X.reshape(self.MODALITIES[self.dtype]["shape"])
         return select_X
 

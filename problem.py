@@ -15,16 +15,18 @@ This parametrizes the setup using building blocks from RAMP workflow.
 import os
 import json
 import copy
+import pickle
 import tempfile
 import pandas as pd
 import numpy as np
 import rampwf as rw
 import nibabel
+import multiprocessing
 from nilearn import plotting, datasets
 from rampwf.utils.pretty_print import print_title
 from sklearn.base import BaseEstimator
 from sklearn.utils import _safe_indexing
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression, Ridge
@@ -84,6 +86,7 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
             os.path.dirname(__file__),
             "quasiraw_space-MNI152_desc-brain_T1w.nii.gz")
         estimator = submission_module.get_estimator()
+        self.site_encoder.fit(y[:, 1].astype(int))
         y_train = _safe_indexing(y, _train_idx)
         y_age, y_site = y_train.T
         y_age = y_age.astype(float)
@@ -98,7 +101,18 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
         for item in estimator:
             if hasattr(item, "indices"):
                 item.indices = train_idx
-        features = features_estimator.predict(X)
+        flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_CACHE")
+        if flag is not None and flag == "on":
+            dirname = os.path.dirname(__file__)
+            feature_file = os.path.join(
+                dirname, "feature_{}.npy".format(len(y_train)))
+            if not os.path.isfile(feature_file):
+                features = features_estimator.predict(X)
+                np.save(feature_file, features)
+            else:
+                features = np.load(feature_file)
+        else:
+            features = features_estimator.predict(X)
         for item in estimator:
             if hasattr(item, "indices"):
                 item.indices = None
@@ -108,12 +122,38 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
                 "({0}).".format(self.max_n_features))
         print("- features:", features.shape)
         print_title("Estimates sites from features...")
-        self.site_encoder.fit(y_site)
-        site_estimator = SiteEstimator()
-        site_estimator.fit(features, self.site_encoder.transform(y_site))
+        if flag is not None and flag == "on":
+            dirname = os.path.dirname(__file__)
+            site_estimator_file = os.path.join(dirname, "site_estimator.pkl")
+            if not os.path.isfile(site_estimator_file):
+                site_estimator = SiteEstimator()
+                site_estimator.fit(features,
+                                   self.site_encoder.transform(y_site))
+                with open(site_estimator_file, "wb") as of:
+                    pickle.dump(site_estimator.site_estimator, of)
+            else:
+                site_estimator = SiteEstimator()
+                with open(site_estimator_file, "rb") as of:
+                    site_estimator.site_estimator = pickle.load(of)
+        else:
+            site_estimator = SiteEstimator()
+            site_estimator.fit(features, self.site_encoder.transform(y_site))
         print_title("Estimates age from features...")
-        age_estimator = AgeEstimator()
-        age_estimator.fit(features, y_age)
+        if flag is not None and flag == "on":
+            dirname = os.path.dirname(__file__)
+            age_estimator_file = os.path.join(dirname, "age_estimator.pkl")
+            if not os.path.isfile(age_estimator_file):
+                age_estimator = AgeEstimator()
+                age_estimator.fit(features, y_age)
+                with open(age_estimator_file, "wb") as of:
+                    pickle.dump(age_estimator.age_estimator, of)
+            else:
+                age_estimator = AgeEstimator()
+                with open(age_estimator_file, "rb") as of:
+                    age_estimator.age_estimator = pickle.load(of)
+        else:
+            age_estimator = AgeEstimator()
+            age_estimator.fit(features, y_age)
         return features_estimator, site_estimator, age_estimator
 
     def test_submission(self, estimators_fitted, X):
@@ -136,8 +176,20 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
         for item in features_estimator:
             if hasattr(item, "indices"):
                 item.indices = range(1, len(X))
-        features = features_estimator.predict(X)
+        flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_CACHE")
+        if flag is not None and flag == "on":
+            dirname = os.path.dirname(__file__)
+            feature_file = os.path.join(
+                dirname, "feature_{}.npy".format(X.shape[0]))
+            if not os.path.isfile(feature_file):
+                features = features_estimator.predict(X)
+                np.save(feature_file, features)
+            else:
+                features = np.load(feature_file)
+        else:
+            features = features_estimator.predict(X)
         split_idx = X[0, 0]
+        print("- features:", features.shape)
         internal_features, external_features = split_data(features, split_idx)
         y_site_pred = site_estimator.predict(internal_features)
         y_age_pred = age_estimator.predict(internal_features)
@@ -174,10 +226,11 @@ class SiteEstimator(BaseEstimator):
     """ Define the site estimator on latent space network features.
     """
     def __init__(self):
+        n_jobs = multiprocessing.cpu_count()
         self.site_estimator = GridSearchCV(
             LogisticRegression(solver="saga", max_iter=150), cv=5,
             param_grid={"C": 10.**np.arange(-2, 3)},
-            scoring="balanced_accuracy")
+            scoring="balanced_accuracy", n_jobs=n_jobs)
 
     def fit(self, X, y):
         self.site_estimator.fit(X, y)
@@ -191,9 +244,10 @@ class AgeEstimator(BaseEstimator):
     """ Define the age estimator on latent space network features.
     """
     def __init__(self):
+        n_jobs = multiprocessing.cpu_count()
         self.age_estimator = GridSearchCV(
             Ridge(), param_grid={"alpha": 10.**np.arange(-2, 3)}, cv=5,
-            scoring="r2")
+            scoring="r2", n_jobs=n_jobs)
 
     def fit(self, X, y):
         self.age_estimator.fit(X, y)
@@ -301,7 +355,7 @@ class BACC(ClassifierBaseScoreType):
                                                split_idx)
             y_pred_label_index, _ = split_data(y_pred_label_index[1:],
                                                split_idx)
-        y_true_label_index = self.site_encoder.transform(y_true_label_index)
+        # y_true_label_index = self.site_encoder.transform(y_true_label_index)
         return balanced_accuracy_score(y_true_label_index, y_pred_label_index)
 
 
@@ -325,7 +379,7 @@ class Accuracy(ClassifierBaseScoreType):
                                                split_idx)
             y_pred_label_index, _ = split_data(y_pred_label_index[1:],
                                                split_idx)
-        y_true_label_index = self.site_encoder.transform(y_true_label_index)
+        # y_true_label_index = self.site_encoder.transform(y_true_label_index)
         return accuracy_score(y_true_label_index, y_pred_label_index)
 
 
@@ -424,6 +478,7 @@ def get_cv(X, y):
     """
     cv_train = KFold(n_splits=5, shuffle=True, random_state=0)
     folds = []
+    flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_CACHE")
     for cnt, (train_idx, test_idx) in enumerate(cv_train.split(X, y)):
         train_idx = train_idx.tolist()
         if 0 in train_idx:
@@ -432,7 +487,9 @@ def get_cv(X, y):
         if 0 in test_idx:
             test_idx.remove(0)
         folds.append((np.asarray(train_idx), np.asarray(test_idx)))
-        if cnt == 1:
+        if flag is not None and flag == "on":
+            break
+        elif cnt == 1:
             break
     return folds
 
@@ -454,12 +511,14 @@ def _read_data(path, dataset):
     y_arr: array (n_samples, )
         target data.
     """
+    print_title("Read {}...".format(dataset.upper()))
     df = pd.read_csv(os.path.join(path, "data", dataset + ".tsv"), sep="\t")
+    df.loc[df["split"] == "external_test", "site"] = np.nan
     y_arr = df[["age", "site"]].values
-    split_data = df["split"].values.tolist()
+    split = df["split"].values.tolist()
     key = "internal_" + dataset
-    split_data.reverse()
-    split_index = len(split_data) - split_data.index(key)
+    split.reverse()
+    split_index = len(split) - split.index(key)
     header = np.empty((1, y_arr.shape[1]))
     header[:] = split_index
     y_arr = np.concatenate([header, y_arr], axis=0)
@@ -467,7 +526,54 @@ def _read_data(path, dataset):
                     mmap_mode="r")
     flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_SMALL")
     if flag is not None and flag == "on":
-        raise NotImplementedError
+        print_title("Activate SMALL mode...")
+        print("- Reducing dataset size:", dataset)
+        print("- y size [original]:", y_arr.shape)
+        print("- x size [original]:", x_arr.shape)
+        y_internal, y_external = split_data(y_arr[1:], split_index)
+        if dataset == "train":
+            n_choices = 6
+        else:
+            n_choices = 2
+        choices = []
+        all_choices = []
+        for idx, y_data in enumerate((y_internal, y_external)):
+            print("- y [internal|external]:", y_data.shape)
+            if len(y_data) == 0:
+                continue
+            sites = y_data[:, 1]
+            _choices = []
+            unique_sites = np.unique(sites)
+            if np.isnan(unique_sites.sum()):
+                unique_sites = unique_sites[:np.argmax(unique_sites) + 1]
+            print("- unique sites:", unique_sites)
+            for site_id in unique_sites:
+                _n_choices = n_choices
+                if np.isnan(site_id):
+                    indices = np.argwhere(np.isnan(sites))[:, 0]
+                    _n_choices = 30
+                else:
+                    indices = np.argwhere(sites == site_id)[:, 0]
+                print("- site {}:".format(site_id), len(indices))
+                vals = np.random.choice(
+                    indices, size=min(_n_choices, len(indices)), replace=False)
+                vals += (idx * split_index) + 1
+                _choices.append(vals.tolist())
+                all_choices.append(vals.tolist())
+            choices.append(_choices)
+        new_split_index = np.sum([len(item) for item in choices[0]])
+        print("- internal split:", new_split_index)
+        y_arrs = [y_arr[indices] for indices in all_choices]
+        header = np.empty((1, y_arr.shape[1]))
+        header[:] = new_split_index
+        y_arr = np.concatenate([header] + y_arrs, axis=0)
+        print("- y size [final]:", y_arr.shape)
+        x_arrs = [np.random.rand(y_arr.shape[0] - 1, x_arr.shape[1])]
+        # x_arrs = [x_arr[indices] for indices in all_choices]
+        header = np.empty((1, x_arr.shape[1]))
+        header[0, 0] = new_split_index
+        x_arr = np.concatenate([header] + x_arrs, axis=0)
+        print("- x size [final]:", x_arr.shape)
     return x_arr, y_arr
 
 
@@ -502,12 +608,22 @@ def _init_from_pred_labels(self, y_pred_labels):
     y_pred_labels : list of objects or list of list of objects
         (of the same type)
     """
+    global site_encoder
     type_of_label = type(self.label_names[0])
     self.y_pred = np.zeros(
         (len(y_pred_labels), len(self.label_names)), dtype=np.float64)
-    if any(np.isnan(y_pred_labels)):
-        self.y_pred[0, 0] = y_pred_labels[0]
+    if (any(np.isnan(y_pred_labels)) or y_pred_labels[0].squeeze() not in
+            site_encoder.classes_):
+        split_index = int(y_pred_labels[0].squeeze())
+        self.y_pred[0, 0] = split_index
         self.y_pred[0, 1:] = np.nan
+        y_select = y_pred_labels[1: split_index + 1]
+        encoded_labels = site_encoder.transform(y_select)
+        y_pred_labels[1: split_index + 1] = encoded_labels.reshape(
+            y_select.shape)
+    else:
+        encoded_labels = site_encoder.transform(y_pred_labels)
+        y_pred_labels = encoded_labels.reshape(y_pred_labels.shape)
     for ps_i, label_list in zip(self.y_pred[1:], y_pred_labels[1:]):
         if type(label_list) != np.ndarray and type(label_list) != list:
             label_list = [label_list]
@@ -551,11 +667,16 @@ def make_multiclass(label_names=[]):
 problem_title = (
     "Brain age prediction and debiasing with site-effect removal in MRI "
     "through representation learning.")
-flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
-if flag is not None and flag == "on":
+flag1 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
+flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_SERVER")
+if flag1 is not None and flag1 == "on":
+    print_title("Activate TEST mode...")
     _prediction_site_names = [0, 1]
-else:
+elif flag2 is not None and flag2 == "on":
+    print_title("Activate SERVER mode...")
     _prediction_site_names = list(range(64))
+else:
+    _prediction_site_names = list(range(58))
 _target_column_names = ["age", "site"]
 site_encoder = LabelEncoder()
 Predictions_age = rw.prediction_types.make_regression(
@@ -640,7 +761,6 @@ class DatasetHelper(object):
         dtype = self._get_dtype(data.shape)
         features = self.resources[dtype]["features"]
         x_df = None
-        print(data.shape)
         if features is not None:
             x_df = pd.DataFrame(data[:, channel_id], columns=features)
         return x_df
