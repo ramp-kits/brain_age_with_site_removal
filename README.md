@@ -23,7 +23,7 @@ For the moment only features derived from T1w images are available comprising Qu
 
 ## Coding framework, for competition and collaboration
 
-The challenge will be carried out on the [RAMP platform](https://ramp.studio). It enables competition and collaboration on data-science problems, using the Python language. To start "hacking", a [starting kit](https://github.com/ramp-kits/brain_age_with_site_removal/brain_age_with_site_removal_starting_kit.ipynb) is available. It provides a simple working example which can be expanded to more advanced solutions.
+The challenge will be carried out on the [RAMP platform](https://ramp.studio). It enables competition and collaboration on data-science problems, using the Python language. To start "hacking", a [starting kit](https://github.com/ramp-kits/brain_age_with_site_removal/blob/main/brain_age_with_site_removal_starting_kit.ipynb) is available. It provides a simple working example which can be expanded to more advanced solutions.
 
 ## For developers
 
