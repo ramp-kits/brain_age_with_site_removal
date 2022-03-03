@@ -264,7 +264,8 @@ def reindex_sites(rootdir):
     sites = df_train.site.values.astype(int)
     site_encoder.fit(sites)
     df_train.site = site_encoder.transform(sites)
-    sites = df_test[df_test["split"] == "internal_test"].site.values.astype(int)
+    sites = df_test[df_test["split"] == "internal_test"].site.values.astype(
+        int)
     df_test.loc[df_test["split"] == "internal_test", "site"] = (
         site_encoder.transform(sites))
     df_test.loc[df_test["split"] == "external_test", "site"] = np.nan
@@ -281,11 +282,11 @@ if __name__ == "__main__":
     #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge")
     # compile_resources(
     #     rootdir="/neurospin/hc/openBHB/resource")
-    #convert_split(
-    #    rootdir="/neurospin/hc/challengeBHB/public_data_challenge",
-    #    name="public_cv_split")
-    #convert_split(
-    #    rootdir="/neurospin/hc/challengeBHB/private_data_challenge",
-    #    name="private__cv_split")
+    # convert_split(
+    #     rootdir="/neurospin/hc/challengeBHB/public_data_challenge",
+    #     name="public_cv_split")
+    # convert_split(
+    #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge",
+    #     name="private__cv_split")
     reindex_sites(
         rootdir="/neurospin/hc/challengeBHB/public_data_challenge")

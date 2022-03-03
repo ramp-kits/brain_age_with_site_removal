@@ -26,7 +26,7 @@ from nilearn import plotting, datasets
 from rampwf.utils.pretty_print import print_title
 from sklearn.base import BaseEstimator
 from sklearn.utils import _safe_indexing
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import KFold
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression, Ridge
