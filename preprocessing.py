@@ -13,7 +13,6 @@ from collections import OrderedDict
 import pandas as pd
 import numpy as np
 import nibabel
-from sklearn.preprocessing import LabelEncoder
 from nilearn.masking import apply_mask
 
 
@@ -142,40 +141,31 @@ def _load(df, resourcedir):
 
 
 def concat_datasets(rootdir):
-    """ Format train and test sets.
+    """ Format test set.
 
     The test set is composed of data with the same sites as in the
     train set (internal dataset) and data with unseen sites during the
     training (external dataset).
-    The first line contains the split index and nans.
 
     Parameters
     ----------
     rootdir: str
         root directory.
     """
-    internal_train_file = os.path.join(rootdir, "internal_train")
     internal_test_file = os.path.join(rootdir, "internal_test")
     external_test_file = os.path.join(rootdir, "external_test")
-    for name, locations in (
-            ("train", (internal_train_file, )),
-            ("test", (internal_test_file, external_test_file))):
-        y_dfs = [pd.read_csv(path + ".tsv", sep="\t") for path in locations]
-        for df, loc in zip(y_dfs, locations):
-            dtype = os.path.basename(loc)
-            df["split"].replace(name, dtype, inplace=True)
-        y_df = pd.concat(y_dfs)
-        y_df.to_csv(os.path.join(rootdir, name + ".tsv"), sep="\t",
-                    index=False)
-        x_arrs = [np.load(path + ".npy", mmap_mode="r") for path in locations]
-        header = np.empty((1, x_arrs[0].shape[1]), dtype=np.single)
-        header[:] = np.nan
-        header[0, 0] = len(x_arrs[0])
-        x_arrs.insert(0, header)
-        print("start")
-        x_arr = np.concatenate(x_arrs, axis=0)
-        print("done")
-        np.save(os.path.join(rootdir, name + ".npy"), x_arr)
+    name = "test"
+    locations = (internal_test_file, external_test_file)
+    y_dfs = [pd.read_csv(path + ".tsv", sep="\t") for path in locations]
+    for df, loc in zip(y_dfs, locations):
+        dtype = os.path.basename(loc)
+        df["split"].replace(name, dtype, inplace=True)
+    y_df = pd.concat(y_dfs)
+    y_df.to_csv(os.path.join(rootdir, name + ".tsv"), sep="\t",
+                index=False)
+    x_arrs = [np.load(path + ".npy", mmap_mode="r") for path in locations]
+    x_arr = np.concatenate(x_arrs, axis=0)
+    np.save(os.path.join(rootdir, name + ".npy"), x_arr)
 
 
 def compile_resources(rootdir):
@@ -245,32 +235,18 @@ def convert_split(rootdir, name):
     desc_file = os.path.join(rootdir, "train.tsv")
     df = pd.read_csv(desc_file, sep="\t")
     print(df)
+    splits = {}
     for fold_name, sets in split_data.items():
+        splits[fold_name] = {}
         for set_name, subjects in sets.items():
             print(fold_name, set_name, len(subjects))
-
-
-def reindex_sites(rootdir):
-    """ Reindex site ids using contiguous indices.
-
-    Parameters
-    ----------
-    rootdir: str
-        root directory.
-    """
-    df_train = pd.read_csv(os.path.join(rootdir, "train.tsv"), sep="\t")
-    df_test = pd.read_csv(os.path.join(rootdir, "test.tsv"), sep="\t")
-    site_encoder = LabelEncoder()
-    sites = df_train.site.values.astype(int)
-    site_encoder.fit(sites)
-    df_train.site = site_encoder.transform(sites)
-    sites = df_test[df_test["split"] == "internal_test"].site.values.astype(
-        int)
-    df_test.loc[df_test["split"] == "internal_test", "site"] = (
-        site_encoder.transform(sites))
-    df_test.loc[df_test["split"] == "external_test", "site"] = np.nan
-    df_train.to_csv(os.path.join(rootdir, "train_.tsv"), sep="\t", index=False)
-    df_test.to_csv(os.path.join(rootdir, "test_.tsv"), sep="\t", index=False)
+            for sid in subjects:
+                index = df[df["participant_id"] == sid].index.tolist()
+                assert len(index) == 1, sid
+                splits[fold_name].setdefault(set_name, []).append(index[0])
+    split_file = os.path.join(rootdir, "cv_splits_indices.json")
+    with open(split_file, "wt") as of:
+        json.dump(splits, of, indent=2)
 
 
 if __name__ == "__main__":
@@ -282,11 +258,9 @@ if __name__ == "__main__":
     #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge")
     # compile_resources(
     #     rootdir="/neurospin/hc/openBHB/resource")
-    # convert_split(
-    #     rootdir="/neurospin/hc/challengeBHB/public_data_challenge",
-    #     name="public_cv_split")
+    convert_split(
+        rootdir="/neurospin/hc/challengeBHB/public_data_challenge",
+        name="public_cv_split")
     # convert_split(
     #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge",
-    #     name="private__cv_split")
-    reindex_sites(
-        rootdir="/neurospin/hc/challengeBHB/public_data_challenge")
+    #     name="private_cv_split")

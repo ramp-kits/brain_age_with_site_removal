@@ -30,6 +30,5 @@ The challenge will be carried out on the [RAMP platform](https://ramp.studio). I
 The behaviour of the code can be controlled from three environment variables:
 
 - RAMP_BRAIN_AGE_SITERM_TEST: set this environment varaible to 'on' in order to work on the test dataset. Under the hood, it will select the appropriate target labels and use a KFold cross-validation.
-- RAMP_BRAIN_AGE_SITERM_SMALL: set this environment varaible to 'on' in order to select a small part of the dataset. This option is usefull when testing the challenge on the server side. 
-- RAMP_BRAIN_AGE_SITERM_CACHE:  set this environment varaible to 'on' in order to save some intermediate results in the problem folder that in turn are used as a hard-caching system.
-- RAMP_BRAIN_AGE_SITERM_SERVER: set this environment varaible to 'on' in order to select the proper options when deploying the event on the server side (i.e. the train datasets don't have the same number of labels).
+- RAMP_BRAIN_AGE_SITERM_SMALL: set this environment varaible to 'on' in order to select a small part of the dataset. This option is usefull when testing the challenge on the server side. A KFold cross-validation is used.
+- RAMP_BRAIN_AGE_SITERM_CACHE:  set this environment varaible to 'on' in order to save some intermediate results in a 'cahcedir' folder that in turn are used as a hard-caching system (be carefull).

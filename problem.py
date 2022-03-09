@@ -14,7 +14,6 @@ This parametrizes the setup using building blocks from RAMP workflow.
 
 import os
 import json
-import copy
 import pickle
 import tempfile
 import pandas as pd
@@ -22,16 +21,16 @@ import numpy as np
 import rampwf as rw
 import nibabel
 import multiprocessing
+from pprint import pprint
+from collections import OrderedDict
 from nilearn import plotting, datasets
 from rampwf.utils.pretty_print import print_title
 from sklearn.base import BaseEstimator
 from sklearn.utils import _safe_indexing
 from sklearn.model_selection import KFold
-from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import (
-    mean_absolute_error, r2_score, balanced_accuracy_score, accuracy_score)
+from sklearn.metrics import mean_absolute_error, balanced_accuracy_score
 
 
 class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
@@ -44,11 +43,10 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
     The training is not performed on the server side. Weights are required at
     the submission time and fold indices are tracked at training time.
     """
-    def __init__(self, site_encoder, filename="estimator.py",
-                 additional_filenames=None, max_n_features=10000):
+    def __init__(self, filename="estimator.py", additional_filenames=None,
+                 max_n_features=10000):
         super().__init__(filename, additional_filenames)
         self.max_n_features = max_n_features
-        self.site_encoder = site_encoder
 
     def train_submission(self, module_path, X, y, train_idx=None):
         """ Train the estimator of a given submission.
@@ -79,6 +77,9 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
             os.path.splitext(self.filename)[0],
             sanitize=True
         )
+        fold = int(os.environ.get("RAMP_BRAIN_AGE_SITERM_FOLD", -1))
+        fold += 1
+        os.environ["RAMP_BRAIN_AGE_SITERM_FOLD"] = str(fold)
         os.environ["VBM_MASK"] = os.path.join(
             os.path.dirname(__file__),
             "cat12vbm_space-MNI152_desc-gm_TPM.nii.gz")
@@ -86,7 +87,6 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
             os.path.dirname(__file__),
             "quasiraw_space-MNI152_desc-brain_T1w.nii.gz")
         estimator = submission_module.get_estimator()
-        self.site_encoder.fit(y[:, 1].astype(int))
         y_train = _safe_indexing(y, _train_idx)
         y_age, y_site = y_train.T
         y_age = y_age.astype(float)
@@ -103,9 +103,11 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
                 item.indices = train_idx
         flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_CACHE")
         if flag is not None and flag == "on":
-            dirname = os.path.dirname(__file__)
+            dirname = os.path.join(os.path.dirname(__file__), "cachedir")
+            if not os.path.isdir(dirname):
+                os.mkdir(dirname)
             feature_file = os.path.join(
-                dirname, "feature_{}.npy".format(len(y_train)))
+                dirname, "fold-{}_feature-{}.npy".format(fold, len(y_train)))
             if not os.path.isfile(feature_file):
                 features = features_estimator.predict(X)
                 np.save(feature_file, features)
@@ -123,12 +125,12 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
         print("- features:", features.shape)
         print_title("Estimates sites from features...")
         if flag is not None and flag == "on":
-            dirname = os.path.dirname(__file__)
-            site_estimator_file = os.path.join(dirname, "site_estimator.pkl")
+            dirname = os.path.join(os.path.dirname(__file__), "cachedir")
+            site_estimator_file = os.path.join(
+                dirname, "fold-{}_site-estimator.pkl".format(fold))
             if not os.path.isfile(site_estimator_file):
                 site_estimator = SiteEstimator()
-                site_estimator.fit(features,
-                                   self.site_encoder.transform(y_site))
+                site_estimator.fit(features, y_site)
                 with open(site_estimator_file, "wb") as of:
                     pickle.dump(site_estimator.site_estimator, of)
             else:
@@ -137,11 +139,14 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
                     site_estimator.site_estimator = pickle.load(of)
         else:
             site_estimator = SiteEstimator()
-            site_estimator.fit(features, self.site_encoder.transform(y_site))
+            site_estimator.fit(features, y_site)
+        os.environ["RAMP_BRAIN_AGE_SITERM_CLASSES"] = json.dumps(
+            site_estimator.site_estimator.classes_.tolist())
         print_title("Estimates age from features...")
         if flag is not None and flag == "on":
-            dirname = os.path.dirname(__file__)
-            age_estimator_file = os.path.join(dirname, "age_estimator.pkl")
+            dirname = os.path.join(os.path.dirname(__file__), "cachedir")
+            age_estimator_file = os.path.join(
+                dirname, "fold-{}_age-estimator.pkl".format(fold))
             if not os.path.isfile(age_estimator_file):
                 age_estimator = AgeEstimator()
                 age_estimator.fit(features, y_age)
@@ -175,12 +180,13 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
         features_estimator, site_estimator, age_estimator = estimators_fitted
         for item in features_estimator:
             if hasattr(item, "indices"):
-                item.indices = range(1, len(X))
+                item.indices = range(len(X))
         flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_CACHE")
+        fold = int(os.environ["RAMP_BRAIN_AGE_SITERM_FOLD"])
         if flag is not None and flag == "on":
-            dirname = os.path.dirname(__file__)
+            dirname = os.path.join(os.path.dirname(__file__), "cachedir")
             feature_file = os.path.join(
-                dirname, "feature_{}.npy".format(X.shape[0]))
+                dirname, "fold-{}_feature-{}.npy".format(fold, X.shape[0]))
             if not os.path.isfile(feature_file):
                 features = features_estimator.predict(X)
                 np.save(feature_file, features)
@@ -188,30 +194,11 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
                 features = np.load(feature_file)
         else:
             features = features_estimator.predict(X)
-        split_idx = X[0, 0]
         print("- features:", features.shape)
-        internal_features, external_features = split_data(features, split_idx)
-        y_site_pred = site_estimator.predict(internal_features)
-        y_age_pred = age_estimator.predict(internal_features)
-        print("- internal features:", internal_features.shape)
-        print("- y site [internal]:", y_site_pred.shape)
-        print("- y age [internal]:", y_age_pred.shape)
-        if len(external_features) > 0:
-            y_age_external_pred = age_estimator.predict(external_features)
-            print("- features [external]:", external_features.shape)
-            print("- y age [external]:", y_age_external_pred.shape)
-            y_age_pred = np.concatenate(
-                (y_age_pred, y_age_external_pred), axis=0)
-            null_pred = np.empty(
-                (len(y_age_external_pred), y_site_pred.shape[1]))
-            null_pred[:] = np.nan
-            y_site_pred = np.concatenate((y_site_pred, null_pred), axis=0)
-        y_age_pred = np.concatenate(([np.nan], y_age_pred), axis=0)
-        header = np.empty((1, y_site_pred.shape[1]))
-        header[:] = np.nan
-        y_site_pred = np.concatenate((header, y_site_pred), axis=0)
-        print("- y site [fusion]:", y_site_pred.shape)
-        print("- y age [fusion]:", y_age_pred.shape)
+        y_site_pred = site_estimator.predict(features)
+        y_age_pred = age_estimator.predict(features)
+        print("- y site:", y_site_pred.shape)
+        print("- y age:", y_age_pred.shape)
         return np.concatenate([y_age_pred.reshape(-1, 1), y_site_pred], axis=1)
 
 
@@ -220,6 +207,55 @@ def split_data(arr, split_idx):
     """
     split_idx = int(split_idx)
     return arr[:split_idx], arr[split_idx:]
+
+
+def get_set_info(size):
+    """ Get information about the current set.
+    """
+    memory = get_memory()
+    if size == memory["test"]["size"]:
+        dtype = "test"
+        split_index = memory["test"]["split_index"]
+    else:
+        fold = int(os.environ["RAMP_BRAIN_AGE_SITERM_FOLD"])
+        fold_info = memory["folds"][fold]
+        if size == fold_info["train"]:
+            dtype = "train"
+            split_index = size
+        elif size == (fold_info["internal_test"] + fold_info["external_test"]):
+            dtype = "test"
+            split_index = fold_info["internal_test"]
+        else:
+            raise ValueError("Can't detect set.")
+    return dtype, split_index
+
+
+def save_memory(data, env_name="RAMP_BRAIN_AGE_SITERM_MEMORY"):
+    """ Dump data in env variable.
+    """
+    os.environ[env_name] = json.dumps(data)
+
+
+def get_memory(env_name="RAMP_BRAIN_AGE_SITERM_MEMORY"):
+    """ Load data in env variable.
+    """
+    return json.loads(os.environ.get(env_name, "{}"))
+
+
+def remap(y):
+    """ Remap labels.
+
+    Note
+    ----
+    If the label was note used in the training stage, use the label -1.
+    """
+    classes = json.loads(os.environ["RAMP_BRAIN_AGE_SITERM_CLASSES"])
+    labels_to_classes = {lab: cls for cls, lab in enumerate(classes)}
+    y_cls = np.array([labels_to_classes[label]
+                      if label in labels_to_classes else -1
+                      for label in y],
+                     dtype=np.int64)
+    return y_cls
 
 
 class SiteEstimator(BaseEstimator):
@@ -257,29 +293,10 @@ class AgeEstimator(BaseEstimator):
         return y_pred
 
 
-class R2(rw.score_types.BaseScoreType):
-    """ Compute coefficient of determination usually denoted as R2.
-    """
-    is_lower_the_better = False
-    minimum = -float("inf")
-    maximum = 1
-
-    def __init__(self, name="r2", precision=2):
-        self.name = name
-        self.precision = precision
-
-    def __call__(self, y_true, y_pred):
-        is_test_set = np.isnan(y_pred[0])
-        if is_test_set:
-            split_idx = y_true[0]
-            y_pred, _ = split_data(y_pred[1:], split_idx)
-            y_true, _ = split_data(y_true[1:], split_idx)
-        return r2_score(y_true, y_pred)
-
-
 class MAE(rw.score_types.BaseScoreType):
     """ Compute mean absolute error, a risk metric corresponding to the
-    expected value of the absolute error loss or l1-norm loss.
+    expected value of the absolute error loss or l1-norm loss, on the internal
+    test set.
     """
     is_lower_the_better = True
     minimum = 0.0
@@ -290,16 +307,17 @@ class MAE(rw.score_types.BaseScoreType):
         self.precision = precision
 
     def __call__(self, y_true, y_pred):
-        is_test_set = np.isnan(y_pred[0])
-        if is_test_set:
-            split_idx = y_true[0, 0]
-            y_pred, _ = split_data(y_pred[1:], split_idx)
-            y_true, _ = split_data(y_true[1:], split_idx)
+        print_title("MAE: {} - {}".format(y_true.shape, y_pred.shape))
+        dtype, split_idx = get_set_info(len(y_true))
+        print("- set info:", dtype, "-", split_idx)
+        if dtype == "test":
+            y_pred, _ = split_data(y_pred, split_idx)
+            y_true, _ = split_data(y_true, split_idx)
         return mean_absolute_error(y_true, y_pred)
 
 
 class ExtMAE(rw.score_types.BaseScoreType):
-    """ Compute mean absolute error on the private external test set.
+    """ Compute mean absolute error on the external test set.
     """
     is_lower_the_better = True
     minimum = 0.0
@@ -310,77 +328,45 @@ class ExtMAE(rw.score_types.BaseScoreType):
         self.precision = precision
 
     def __call__(self, y_true, y_pred):
-        is_test_set = np.isnan(y_pred[0])
-        if is_test_set:
-            split_idx = y_true[0, 0]
-            y_pred, y_pred_external = split_data(y_pred[1:], split_idx)
-            y_true, y_true_external = split_data(y_true[1:], split_idx)
+        print_title(
+            "External MAE: {} - {}".format(y_true.shape, y_pred.shape))
+        dtype, split_idx = get_set_info(len(y_true))
+        print("- set info:", dtype, "-", split_idx)
+        if dtype == "test" and split_idx != len(y_true):
+            _, y_pred_external = split_data(y_pred, split_idx)
+            _, y_true_external = split_data(y_true, split_idx)
         else:
+            # TODO: use internal set if numerical issues
+            return np.nan
             y_pred_external = y_pred
             y_true_external = y_true
         return mean_absolute_error(y_true_external, y_pred_external)
 
 
-class ClassifierBaseScoreType(rw.score_types.base.BaseScoreType):
-    def score_function(self, ground_truths, predictions, valid_indexes=None):
-        self.label_names = ground_truths.label_names
-        if valid_indexes is None:
-            valid_indexes = slice(None, None, None)
-        elif -1 in predictions.y_pred_label_index and all(valid_indexes[1:]):
-            valid_indexes[0] = True
-        y_pred_label_index = predictions.y_pred_label_index[valid_indexes]
-        y_true_label_index = ground_truths.y_pred_label_index[valid_indexes]
-        self.check_y_pred_dimensions(y_true_label_index, y_pred_label_index)
-        return self.__call__(y_true_label_index, y_pred_label_index)
-
-
-class BACC(ClassifierBaseScoreType):
+class BACC(rw.score_types.classifier_base.ClassifierBaseScoreType):
     """ Compute balanced accuracy, which avoids inflated performance
-    estimates on imbalanced datasets.
+    estimates on imbalanced datasets, on the internal test set.
     """
     is_lower_the_better = False
     minimum = 0.0
     maximum = 1.0
 
-    def __init__(self, site_encoder, name="bacc", precision=2):
+    def __init__(self, name="bacc", precision=2):
         self.name = name
         self.precision = precision
-        self.site_encoder = site_encoder
 
     def __call__(self, y_true_label_index, y_pred_label_index):
-        is_test_set = (-1 in y_pred_label_index)
-        if is_test_set:
-            split_idx = y_true_label_index[0]
-            y_true_label_index, _ = split_data(y_true_label_index[1:],
-                                               split_idx)
-            y_pred_label_index, _ = split_data(y_pred_label_index[1:],
-                                               split_idx)
-        # y_true_label_index = self.site_encoder.transform(y_true_label_index)
-        return balanced_accuracy_score(y_true_label_index, y_pred_label_index)
-
-
-class Accuracy(ClassifierBaseScoreType):
-    """ Compute accuracy.
-    """
-    is_lower_the_better = False
-    minimum = 0.0
-    maximum = 1.0
-
-    def __init__(self, site_encoder, name="accuracy", precision=2):
-        self.name = name
-        self.precision = precision
-        self.site_encoder = site_encoder
-
-    def __call__(self, y_true_label_index, y_pred_label_index):
-        is_test_set = (-1 in y_pred_label_index)
-        if is_test_set:
-            split_idx = y_true_label_index[0]
-            y_true_label_index, _ = split_data(y_true_label_index[1:],
-                                               split_idx)
-            y_pred_label_index, _ = split_data(y_pred_label_index[1:],
-                                               split_idx)
-        # y_true_label_index = self.site_encoder.transform(y_true_label_index)
-        return accuracy_score(y_true_label_index, y_pred_label_index)
+        print_title("BACC: {} - {}".format(
+            y_true_label_index.shape, y_pred_label_index.shape))
+        dtype, split_idx = get_set_info(len(y_true_label_index))
+        print("- set info:", dtype, "-", split_idx)
+        if dtype == "test":
+            y_true_label_index, _ = split_data(y_true_label_index, split_idx)
+            y_pred_label_index, _ = split_data(y_pred_label_index, split_idx)
+        y_true_label_index = remap(y_true_label_index)
+        indices = (y_true_label_index != -1)
+        return balanced_accuracy_score(y_true_label_index[indices],
+                                       y_pred_label_index[indices])
 
 
 class RMSE(rw.score_types.BaseScoreType):
@@ -395,11 +381,12 @@ class RMSE(rw.score_types.BaseScoreType):
         self.precision = precision
 
     def __call__(self, y_true, y_pred):
-        is_test_set = np.isnan(y_pred[0])
-        if is_test_set:
-            split_idx = y_true[0, 0]
-            y_pred, _ = split_data(y_pred[1:], split_idx)
-            y_true, _ = split_data(y_true[1:], split_idx)
+        print_title("RMSE: {} - {}".format(y_true.shape, y_pred.shape))
+        dtype, split_idx = get_set_info(len(y_true))
+        print("- set info:", dtype, "-", split_idx)
+        if dtype == "test":
+            y_pred, _ = split_data(y_pred, split_idx)
+            y_true, _ = split_data(y_true, split_idx)
         return np.sqrt(np.mean(np.square(y_true - y_pred)))
 
 
@@ -416,55 +403,35 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
         self.score_types = score_types
         self.n_sites = n_sites
         self.precision = precision
-        self.score_type_mae_private_age = MAE(
-            name="mae_private_age", precision=3)
+        self.score_type_ext_mae_age = ExtMAE(name="ext_mae_age", precision=3)
 
     def score_function(self, ground_truths_combined, predictions_combined,
                        valid_indexes=None):
+        print_title("DeepDebiasingMetric: {}".format(valid_indexes is None))
         scores = {}
         split_idx = None
         for score_type, ground_truths, predictions in zip(
                 self.score_types,
                 ground_truths_combined.predictions_list,
                 predictions_combined.predictions_list):
-            ground_truths = copy.deepcopy(ground_truths)
-            predictions = copy.deepcopy(predictions)
             _predictions = predictions.y_pred
             _ground_truths = ground_truths.y_pred
-            if _predictions.ndim == 1:
-                is_test_set = (
-                    (-1 in _predictions) or np.isnan(_predictions[0]))
-            else:
-                is_test_set = (
-                    (-1 in _predictions) or np.isnan(_predictions[0, 0]))
-            if is_test_set:
-                if split_idx is None:
-                    if _ground_truths.ndim == 1:
-                        split_idx = _ground_truths[0]
-                    else:
-                        split_idx = _ground_truths[0, 0]
-                internal_predictions, external_predictions = split_data(
-                    _predictions[1:], split_idx)
-                internal_ground_truths, external_ground_truths = split_data(
-                    _ground_truths[1:], split_idx)
-                if internal_ground_truths.ndim == 1:
-                    scores[self.score_type_mae_private_age.name] = (
-                        self.score_type_mae_private_age(
-                            external_ground_truths, external_predictions))
-                if (valid_indexes is None or
-                        len(valid_indexes) != len(internal_ground_truths) + 1):
-                    ground_truths.y_pred = internal_ground_truths
-                    predictions.y_pred = internal_predictions
-                    valid_indexes = None
-                else:
-                    ground_truths.y_pred = np.concatenate(
-                        (_ground_truths[:1], internal_ground_truths), axis=0)
-                    predictions.y_pred = np.concatenate(
-                        (_predictions[:1], internal_predictions), axis=0)
+            if valid_indexes is not None:
+                _predictions = _safe_indexing(_predictions, valid_indexes)
+                _ground_truths = _safe_indexing(_ground_truths, valid_indexes)
+            print("- set:", _predictions.shape, "-", _ground_truths.shape)
+            dtype, split_idx = get_set_info(len(_ground_truths))
+            if dtype == "test" and _ground_truths.shape[1] == 1:
+                scores[self.score_type_ext_mae_age.name] = (
+                    self.score_type_ext_mae_age(_ground_truths, _predictions))
             scores[score_type.name] = score_type.score_function(
                 ground_truths, predictions, valid_indexes)
+        pprint(scores)
+        # TODO: don't comput the first part of the loss if numerical issues
+        if "ext_mae_age" not in scores:
+            return np.nan
         metric = (
-            scores.get("mae_private_age", 0) * scores["bacc_site"] +
+            scores.get("ext_mae_age", 0) * scores["bacc_site"] +
             (1. / self.n_sites) * scores["mae_age"])
         return metric
 
@@ -474,28 +441,48 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
 
 def get_cv(X, y):
     """ Get N folds cross validation indices.
-    Remove the index 0 as it corresponds to the header.
     """
-    cv_train = KFold(n_splits=5, shuffle=True, random_state=0)
+    flag1 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
+    flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_SMALL")
     folds = []
-    flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_CACHE")
-    for cnt, (train_idx, test_idx) in enumerate(cv_train.split(X, y)):
-        train_idx = train_idx.tolist()
-        if 0 in train_idx:
-            train_idx.remove(0)
-        test_idx = test_idx.tolist()
-        if 0 in test_idx:
-            test_idx.remove(0)
-        folds.append((np.asarray(train_idx), np.asarray(test_idx)))
-        if flag is not None and flag == "on":
-            break
-        elif cnt == 1:
-            break
+    folds_desc = []
+    if ((flag1 is not None and flag1 == "on") or
+            (flag2 is not None and flag2 == "on")):
+        print("- kfold")
+        cv_train = KFold(n_splits=5, shuffle=True, random_state=0)
+        for cnt, (train_idx, test_idx) in enumerate(cv_train.split(X, y)):
+            train_idx = train_idx.tolist()
+            test_idx = test_idx.tolist()
+            folds_desc.append({
+                "train": len(train_idx),
+                "internal_test": len(test_idx),
+                "external_test": 0})
+            folds.append((np.asarray(train_idx), np.asarray(test_idx)))
+            if cnt == 0:
+                break
+    else:
+        print("- fixed stratified")
+        split_file = os.path.join(
+            os.path.dirname(__file__), "cv_splits_indices.json")
+        with open(split_file, "rt") as of:
+            splits = json.load(of, object_pairs_hook=OrderedDict)
+        for fold_name, sets in splits.items():
+            folds_desc.append({
+                "train": len(sets["train"]),
+                "internal_test": len(sets["internal_test"]),
+                "external_test": len(sets["external_test"])})
+            test_idx = sets["internal_test"] + sets["external_test"]
+            folds.append((np.asarray(sets["train"]), np.asarray(test_idx)))
+    memory = get_memory()
+    memory["folds"] = folds_desc
+    save_memory(memory)
     return folds
 
 
 def _read_data(path, dataset):
     """ Read data.
+
+    Tho code assumes that the internal and external sets are stacked.
 
     Parameters
     ----------
@@ -515,26 +502,26 @@ def _read_data(path, dataset):
     df = pd.read_csv(os.path.join(path, "data", dataset + ".tsv"), sep="\t")
     df.loc[df["split"] == "external_test", "site"] = np.nan
     y_arr = df[["age", "site"]].values
-    split = df["split"].values.tolist()
-    key = "internal_" + dataset
-    split.reverse()
-    split_index = len(split) - split.index(key)
-    header = np.empty((1, y_arr.shape[1]))
-    header[:] = split_index
-    y_arr = np.concatenate([header, y_arr], axis=0)
     x_arr = np.load(os.path.join(path, "data", dataset + ".npy"),
                     mmap_mode="r")
+    print("- y size [original]:", y_arr.shape)
+    print("- x size [original]:", x_arr.shape)
+    if dataset == "test":
+        split = df["split"].values.tolist()
+        key = "internal_" + dataset
+        split.reverse()
+        split_index = len(split) - split.index(key)
+    else:
+        split_index = len(y_arr)
     flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_SMALL")
     if flag is not None and flag == "on":
         print_title("Activate SMALL mode...")
         print("- Reducing dataset size:", dataset)
-        print("- y size [original]:", y_arr.shape)
-        print("- x size [original]:", x_arr.shape)
-        y_internal, y_external = split_data(y_arr[1:], split_index)
-        if dataset == "train":
-            n_choices = 6
-        else:
+        if dataset == "test":
             n_choices = 2
+        else:
+            n_choices = 6
+        y_internal, y_external = split_data(y_arr, split_index)
         choices = []
         all_choices = []
         for idx, y_data in enumerate((y_internal, y_external)):
@@ -544,36 +531,30 @@ def _read_data(path, dataset):
             sites = y_data[:, 1]
             _choices = []
             unique_sites = np.unique(sites)
-            if np.isnan(unique_sites.sum()):
-                unique_sites = unique_sites[:np.argmax(unique_sites) + 1]
             print("- unique sites:", unique_sites)
             for site_id in unique_sites:
                 _n_choices = n_choices
-                if np.isnan(site_id):
-                    indices = np.argwhere(np.isnan(sites))[:, 0]
-                    _n_choices = 30
-                else:
-                    indices = np.argwhere(sites == site_id)[:, 0]
+                indices = np.argwhere(sites == site_id)[:, 0]
                 print("- site {}:".format(site_id), len(indices))
                 vals = np.random.choice(
                     indices, size=min(_n_choices, len(indices)), replace=False)
-                vals += (idx * split_index) + 1
+                vals += (idx * split_index)
                 _choices.append(vals.tolist())
                 all_choices.append(vals.tolist())
             choices.append(_choices)
-        new_split_index = np.sum([len(item) for item in choices[0]])
-        print("- internal split:", new_split_index)
+        split_index = np.sum([len(item) for item in choices[0]])
+        print("- internal split:", split_index)
         y_arrs = [y_arr[indices] for indices in all_choices]
-        header = np.empty((1, y_arr.shape[1]))
-        header[:] = new_split_index
-        y_arr = np.concatenate([header] + y_arrs, axis=0)
+        y_arr = np.concatenate(y_arrs, axis=0)
         print("- y size [final]:", y_arr.shape)
-        x_arrs = [np.random.rand(y_arr.shape[0] - 1, x_arr.shape[1])]
+        x_arrs = [np.random.rand(y_arr.shape[0], x_arr.shape[1])]
         # x_arrs = [x_arr[indices] for indices in all_choices]
-        header = np.empty((1, x_arr.shape[1]))
-        header[0, 0] = new_split_index
-        x_arr = np.concatenate([header] + x_arrs, axis=0)
+        x_arr = np.concatenate(x_arrs, axis=0)
         print("- x size [final]:", x_arr.shape)
+    memory = get_memory()
+    if dataset not in memory:
+        memory[dataset] = {"size": len(x_arr), "split_index": split_index}
+        save_memory(memory)
     return x_arr, y_arr
 
 
@@ -608,23 +589,10 @@ def _init_from_pred_labels(self, y_pred_labels):
     y_pred_labels : list of objects or list of list of objects
         (of the same type)
     """
-    global site_encoder
     type_of_label = type(self.label_names[0])
     self.y_pred = np.zeros(
         (len(y_pred_labels), len(self.label_names)), dtype=np.float64)
-    if (any(np.isnan(y_pred_labels)) or y_pred_labels[0].squeeze() not in
-            site_encoder.classes_):
-        split_index = int(y_pred_labels[0].squeeze())
-        self.y_pred[0, 0] = split_index
-        self.y_pred[0, 1:] = np.nan
-        y_select = y_pred_labels[1: split_index + 1]
-        encoded_labels = site_encoder.transform(y_select)
-        y_pred_labels[1: split_index + 1] = encoded_labels.reshape(
-            y_select.shape)
-    else:
-        encoded_labels = site_encoder.transform(y_pred_labels)
-        y_pred_labels = encoded_labels.reshape(y_pred_labels.shape)
-    for ps_i, label_list in zip(self.y_pred[1:], y_pred_labels[1:]):
+    for ps_i, label_list in zip(self.y_pred, y_pred_labels):
         if type(label_list) != np.ndarray and type(label_list) != list:
             label_list = [label_list]
         if not any(np.isnan(label_list)):
@@ -643,23 +611,33 @@ def _y_pred_label_index(self):
     labels = np.argmax(self.y_pred, axis=1)
     if len(indices) > 0:
         labels[indices] = -1
-        if not np.isnan(self.y_pred[0, 0]):
-            labels[0] = int(self.y_pred[0, 0])
     return labels
+
+
+def _multiclass_init(self, y_pred=None, y_true=None, n_samples=None):
+    if y_pred is not None:
+        self.y_pred = np.array(y_pred)
+    elif y_true is not None:
+        self._init_from_pred_labels(y_true)
+    elif n_samples is not None:
+        self.y_pred = np.empty((n_samples, self.n_columns), dtype=float)
+        self.y_pred.fill(np.nan)
+    else:
+        raise ValueError("Missing init argument: y_pred, y_true, or n_samples")
 
 
 def make_multiclass(label_names=[]):
     Predictions = type(
-        'Predictions',
+        "Predictions",
         (rw.prediction_types.multiclass.BasePrediction,),
-        {'label_names': label_names,
-         'n_columns': len(label_names),
-         'n_columns_true': 0,
-         '__init__': rw.prediction_types.multiclass._multiclass_init,
-         '_init_from_pred_labels': _init_from_pred_labels,
-         'y_pred_label_index': _y_pred_label_index,
-         'y_pred_label': rw.prediction_types.multiclass._y_pred_label,
-         'combine': rw.prediction_types.multiclass._combine,
+        {"label_names": label_names,
+         "n_columns": len(label_names),
+         "n_columns_true": 0,
+         "__init__": _multiclass_init,
+         "_init_from_pred_labels": _init_from_pred_labels,
+         "y_pred_label_index": _y_pred_label_index,
+         "y_pred_label": rw.prediction_types.multiclass._y_pred_label,
+         "combine": rw.prediction_types.multiclass._combine,
          })
     return Predictions
 
@@ -667,29 +645,23 @@ def make_multiclass(label_names=[]):
 problem_title = (
     "Brain age prediction and debiasing with site-effect removal in MRI "
     "through representation learning.")
-flag1 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
-flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_SERVER")
-if flag1 is not None and flag1 == "on":
+flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
+if flag is not None and flag == "on":
     print_title("Activate TEST mode...")
     _prediction_site_names = [0, 1]
-elif flag2 is not None and flag2 == "on":
-    print_title("Activate SERVER mode...")
-    _prediction_site_names = list(range(64))
 else:
-    _prediction_site_names = list(range(58))
+    print_title("Activate TRAINING mode...")
+    _prediction_site_names = list(range(64))
 _target_column_names = ["age", "site"]
-site_encoder = LabelEncoder()
 Predictions_age = rw.prediction_types.make_regression(
     label_names=[_target_column_names[0]])
 Predictions_site = make_multiclass(
     label_names=_prediction_site_names)
 Predictions = rw.prediction_types.make_combined(
     [Predictions_age, Predictions_site])
-score_type_r2_age = R2(name="r2_age", precision=3)
 score_type_mae_age = MAE(name="mae_age", precision=3)
 score_type_rmse_age = RMSE(name="rmse_age", precision=3)
-score_type_acc_site = Accuracy(site_encoder, name="acc_site", precision=3)
-score_type_bacc_site = BACC(site_encoder, name="bacc_site", precision=3)
+score_type_bacc_site = BACC(name="bacc_site", precision=3)
 score_type_ext_mae_age = ExtMAE(name="ext_mae_age", precision=3)
 
 score_types = [
@@ -697,36 +669,35 @@ score_types = [
         name="challenge_metric", precision=3,
         n_sites=len(_prediction_site_names),
         score_types=[score_type_mae_age, score_type_bacc_site]),
-    rw.score_types.MakeCombined(score_type=score_type_r2_age, index=0),
     rw.score_types.MakeCombined(score_type=score_type_mae_age, index=0),
     rw.score_types.MakeCombined(score_type=score_type_rmse_age, index=0),
-    rw.score_types.MakeCombined(score_type=score_type_acc_site, index=1),
     rw.score_types.MakeCombined(score_type=score_type_bacc_site, index=1),
     rw.score_types.MakeCombined(score_type=score_type_ext_mae_age, index=0)
 ]
 workflow = DeepDebiasingEstimator(
-    site_encoder, filename="estimator.py",
+    filename="estimator.py",
     additional_filenames=["weights.pth", "metadata.pkl"])
 
 
 class DatasetHelper(object):
-    """ Simple structure that deals with the data strucutre, ie. the first
-    line contains the header, ie. the size of the internal dataset
-    and is used to split the internal & external test sets.
+    """ Simple structure that deals with the data strucutre - a train set
+    & a test set composed of internal & external parts:
+
+    - the internal part of the test set is composed of subjects acquired in
+    sites available in the train set.
+    - the external part of the test set is composed of subjects acquired in
+    unseen sites.
     """
-    def __init__(self, data=None, data_loader=None):
-        if data is not None:
-            self.X, self.y = data
-        elif data_loader is not None:
-            self.X, self.y = data_loader()
-        else:
-            raise ValueError("You need to specify the data (X, y) or a "
-                             "callable that returnes these data.")
-        self.internal_idx = int(self.X[0, 0])
-        if len(self.X) == (self.internal_idx + 1):
-            self.dtype = "train"
-        else:
+    def __init__(self, data_loader):
+        self.X, self.y = data_loader()
+        memory = get_memory()
+        size = len(self.y)
+        if "test" in memory and size == memory["test"]["size"]:
             self.dtype = "test"
+            self.internal_idx = memory["test"]["split_index"]
+        else:
+            self.dtype = "train"
+            self.internal_idx = size
         self.indices = None
         resource_file = os.path.join(os.path.dirname(__file__),
                                      "resources.json")
@@ -740,9 +711,9 @@ class DatasetHelper(object):
             raise ValueError("The train set is composed only of an internal "
                              "set.")
         if dtype == "internal":
-            self.indices = slice(1, self.internal_idx + 1, None)
+            self.indices = slice(0, self.internal_idx, None)
         else:
-            self.indices = slice(self.internal_idx + 1, None, None)
+            self.indices = slice(self.internal_idx, None, None)
         return self.X[self.indices], self.y[self.indices]
 
     def get_channels_info(self, data):

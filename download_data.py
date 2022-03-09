@@ -90,17 +90,13 @@ def generate_random_data(rootdir, dtype, n_samples):
         df = pd.DataFrame(data=np.arange(n_samples), columns=["samples"])
         df["age"] = np.random.randint(5, 80, n_samples)
         if name == "external_test":
-            df["site"] = ""
+            df["site"] = 3
         else:
             df["site"] = np.random.randint(0, 2, n_samples)
         y_arr = df[["age", "site"]].values
         split_info.extend([name] * len(y_arr))
         x_arrs.append(x_arr)
         y_arrs.append(y_arr)
-    header = np.empty((1, x_arrs[0].shape[1]))
-    header[:] = np.nan
-    header[0, 0] = len(x_arrs[0])
-    x_arrs.insert(0, header)
     x_arr = np.concatenate(x_arrs, axis=0)
     y_arr = np.concatenate(y_arrs, axis=0)
     df = pd.DataFrame(y_arr, columns=("age", "site"))
