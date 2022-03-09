@@ -559,7 +559,7 @@ def _read_data(path, dataset):
                 _choices.append(vals.tolist())
                 all_choices.append(vals.tolist())
             choices.append(_choices)
-        split_index = np.sum([len(item) for item in choices[0]])
+        split_index = int(np.sum([len(item) for item in choices[0]]))
         print("- internal split:", split_index)
         y_arrs = [y_arr[indices] for indices in all_choices]
         y_arr = np.concatenate(y_arrs, axis=0)
