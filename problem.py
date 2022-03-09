@@ -19,6 +19,7 @@ import tempfile
 import pandas as pd
 import numpy as np
 import rampwf as rw
+from rampwf.prediction_types.base import BasePrediction
 import nibabel
 import multiprocessing
 from pprint import pprint
@@ -31,6 +32,19 @@ from sklearn.model_selection import KFold
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import mean_absolute_error, balanced_accuracy_score
+
+
+def combine_wrapper(wrapped_func):
+    wrapped_func = wrapped_func.__func__
+
+    def _w(*args, **kwargs):
+        return args[1][-1]
+
+    return classmethod(_w)
+
+
+# Monkey patch combine method to deactivatet bagging
+BasePrediction.combine = combine_wrapper(BasePrediction.combine)
 
 
 class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
@@ -140,8 +154,6 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
         else:
             site_estimator = SiteEstimator()
             site_estimator.fit(features, y_site)
-        os.environ["RAMP_BRAIN_AGE_SITERM_CLASSES"] = json.dumps(
-            site_estimator.site_estimator.classes_.tolist())
         print_title("Estimates age from features...")
         if flag is not None and flag == "on":
             dirname = os.path.join(os.path.dirname(__file__), "cachedir")
@@ -209,7 +221,7 @@ def split_data(arr, split_idx):
     return arr[:split_idx], arr[split_idx:]
 
 
-def get_set_info(size):
+def get_set_info(size, last_chance=False):
     """ Get information about the current set.
     """
     memory = get_memory()
@@ -219,6 +231,8 @@ def get_set_info(size):
     else:
         fold = int(os.environ["RAMP_BRAIN_AGE_SITERM_FOLD"])
         fold_info = memory["folds"][fold]
+        print(fold, size)
+        print(fold_info["internal_test"] + fold_info["external_test"])
         if size == fold_info["train"]:
             dtype = "train"
             split_index = size
@@ -226,6 +240,19 @@ def get_set_info(size):
             dtype = "test"
             split_index = fold_info["internal_test"]
         else:
+            # Last chance try auto fold detection (used for bagging)
+            if not last_chance:
+                fold_sizes = [item["internal_test"] + item["external_test"]
+                              for item in memory["folds"]]
+                fold_sizes = np.asarray(fold_sizes)
+                auto_detect = (fold_sizes == size)
+                if auto_detect.sum() != 1:
+                    pprint(memory)
+                    raise ValueError("Can't auto detect set.")
+                fold = int(np.argwhere(auto_detect).squeeze())
+                os.environ["RAMP_BRAIN_AGE_SITERM_FOLD"] = str(fold)
+                return get_set_info(size, last_chance=True)
+            pprint(memory)
             raise ValueError("Can't detect set.")
     return dtype, split_index
 
@@ -240,22 +267,6 @@ def get_memory(env_name="RAMP_BRAIN_AGE_SITERM_MEMORY"):
     """ Load data in env variable.
     """
     return json.loads(os.environ.get(env_name, "{}"))
-
-
-def remap(y):
-    """ Remap labels.
-
-    Note
-    ----
-    If the label was note used in the training stage, use the label -1.
-    """
-    classes = json.loads(os.environ["RAMP_BRAIN_AGE_SITERM_CLASSES"])
-    labels_to_classes = {lab: cls for cls, lab in enumerate(classes)}
-    y_cls = np.array([labels_to_classes[label]
-                      if label in labels_to_classes else -1
-                      for label in y],
-                     dtype=np.int64)
-    return y_cls
 
 
 class SiteEstimator(BaseEstimator):
@@ -273,7 +284,14 @@ class SiteEstimator(BaseEstimator):
 
     def predict(self, X):
         y_pred = self.site_estimator.predict_proba(X)
-        return y_pred
+        return self.remap(y_pred)
+
+    def remap(self, y):
+        n_sites = int(os.environ["RAMP_BRAIN_AGE_SITERM_NSITES"])
+        classes = self.site_estimator.classes_.tolist()
+        y_full = np.zeros((len(y), n_sites), dtype=y.dtype)
+        y_full[:, tuple(classes)] = y
+        return y_full
 
 
 class AgeEstimator(BaseEstimator):
@@ -363,7 +381,6 @@ class BACC(rw.score_types.classifier_base.ClassifierBaseScoreType):
         if dtype == "test":
             y_true_label_index, _ = split_data(y_true_label_index, split_idx)
             y_pred_label_index, _ = split_data(y_pred_label_index, split_idx)
-        y_true_label_index = remap(y_true_label_index)
         indices = (y_true_label_index != -1)
         return balanced_accuracy_score(y_true_label_index[indices],
                                        y_pred_label_index[indices])
@@ -649,9 +666,11 @@ flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
 if flag is not None and flag == "on":
     print_title("Activate TEST mode...")
     _prediction_site_names = [0, 1]
+    os.environ["RAMP_BRAIN_AGE_SITERM_NSITES"] = "2"
 else:
     print_title("Activate TRAINING mode...")
     _prediction_site_names = list(range(64))
+    os.environ["RAMP_BRAIN_AGE_SITERM_NSITES"] = "64"
 _target_column_names = ["age", "site"]
 Predictions_age = rw.prediction_types.make_regression(
     label_names=[_target_column_names[0]])
