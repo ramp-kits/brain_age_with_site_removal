@@ -28,3 +28,5 @@ jobs:
       run: |
         python download_data.py --test
         ramp-test --quick-test
+      env:
+        RAMP_BRAIN_AGE_SITERM_TEST: on

@@ -59,7 +59,8 @@ def generate_random_data(rootdir, dtype, n_samples):
     """ Generate random data.
 
     The test set is composed of data with the same sites as in the
-    train set and data with unssen sites during the training.
+    train set (internal dataset) and data with unseen sites during the
+    training (external dataset).
     The first line contains the split index and nans.
 
     Parameters
@@ -80,30 +81,26 @@ def generate_random_data(rootdir, dtype, n_samples):
     """
     x_arrs, y_arrs = [], []
     if dtype == "test":
-        dtypes = ["test", "private_test"]
+        dtypes = ["internal_test", "external_test"]
     else:
-        dtypes = [dtype]
+        dtypes = ["internal_train"]
+    split_info = []
     for name in dtypes:
-        x_arr = np.random.rand(n_samples, 2348836)
-        df = pd.DataFrame(data=range(n_samples), columns=["samples"])
+        x_arr = np.random.rand(n_samples, 3659572)
+        df = pd.DataFrame(data=np.arange(n_samples), columns=["samples"])
         df["age"] = np.random.randint(5, 80, n_samples)
-        if name == "private_test":
-            df["site"] = ""
+        if name == "external_test":
+            df["site"] = 3
         else:
             df["site"] = np.random.randint(0, 2, n_samples)
         y_arr = df[["age", "site"]].values
+        split_info.extend([name] * len(y_arr))
         x_arrs.append(x_arr)
         y_arrs.append(y_arr)
-    header = np.empty((1, x_arrs[0].shape[1]))
-    header[:] = np.nan
-    header[0, 0] = len(x_arrs[0])
-    x_arrs.insert(0, header)
-    header = np.empty((1, y_arrs[0].shape[1]))
-    header[:] = len(y_arrs[0])
-    y_arrs.insert(0, header)
     x_arr = np.concatenate(x_arrs, axis=0)
     y_arr = np.concatenate(y_arrs, axis=0)
     df = pd.DataFrame(y_arr, columns=("age", "site"))
+    df["split"] = split_info
     np.save(os.path.join(rootdir, dtype + ".npy"), x_arr.astype(np.float32))
     df.to_csv(os.path.join(rootdir, dtype + ".tsv"), sep="\t", index=False)
     return x_arr, y_arr

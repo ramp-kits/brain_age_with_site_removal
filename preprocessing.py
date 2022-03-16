@@ -8,6 +8,7 @@
 ##########################################################################
 
 import os
+import json
 from collections import OrderedDict
 import pandas as pd
 import numpy as np
@@ -24,6 +25,10 @@ MODALITITES = OrderedDict([
         "pattern": "sub-{0}_preproc-quasiraw_T1w.npy",
         "shape": (-1, 1, 182, 218, 182),
         "size": 1827095}),
+    ("xhemi", {
+        "pattern": "sub-{0}_preproc-freesurfer_desc-xhemi_T1w.npy",
+        "shape": (-1, 8, 163842),
+        "size": 1310736}),
     ("vbm_roi", {
         "pattern": "sub-{0}_preproc-cat12vbm_desc-gm_ROI.npy",
         "shape": (-1, 1, 284),
@@ -76,7 +81,7 @@ def organize_data(rootdir):
     private_test_df = _intersect(private_test_df, private_df, privatedatadir)
     private_test_df["site"] = ""
     for name, df in (("train", train_df), ("test", test_df),
-                     ("private_test", private_test_df)):
+                     ("private_external_test", private_test_df)):
         print("-", name)
         print(df)
         data = _load(df, resourcedir)
@@ -107,8 +112,6 @@ def _load(df, resourcedir):
                  for key, val in MASKS.items())
     for key in masks:
         arr = nibabel.load(masks[key]).get_fdata()
-        if key == "vbm":
-            arr = arr[..., 0]
         thr = MASKS[key]["thr"]
         arr[arr <= thr] = 0
         arr[arr > thr] = 1
@@ -137,6 +140,127 @@ def _load(df, resourcedir):
     return data
 
 
+def concat_datasets(rootdir):
+    """ Format test set.
+
+    The test set is composed of data with the same sites as in the
+    train set (internal dataset) and data with unseen sites during the
+    training (external dataset).
+
+    Parameters
+    ----------
+    rootdir: str
+        root directory.
+    """
+    internal_test_file = os.path.join(rootdir, "internal_test")
+    external_test_file = os.path.join(rootdir, "external_test")
+    name = "test"
+    locations = (internal_test_file, external_test_file)
+    y_dfs = [pd.read_csv(path + ".tsv", sep="\t") for path in locations]
+    for df, loc in zip(y_dfs, locations):
+        dtype = os.path.basename(loc)
+        df["split"].replace(name, dtype, inplace=True)
+    y_df = pd.concat(y_dfs)
+    y_df.to_csv(os.path.join(rootdir, name + ".tsv"), sep="\t",
+                index=False)
+    x_arrs = [np.load(path + ".npy", mmap_mode="r") for path in locations]
+    x_arr = np.concatenate(x_arrs, axis=0)
+    np.save(os.path.join(rootdir, name + ".npy"), x_arr)
+
+
+def compile_resources(rootdir):
+    """ Compile all resources in one file.
+
+    Parameters
+    ----------
+    rootdir: str
+        root directory.
+    """
+    data = {
+        "vbm": {
+            "shape": (-1, 1, 121, 145, 121),
+            "features": None,
+            "channels": ["GM"]},
+        "quasiraw": {
+            "shape": (-1, 1, 182, 218, 182),
+            "features": None,
+            "channels": ["T1w"]},
+        "vbm_roi": {
+            "shape": (-1, 1, 284),
+            "features": np.loadtxt(os.path.join(
+                rootdir, "cat12vbm_labels.txt"), dtype=str),
+            "channels": ["GM"]},
+        "desikan_roi": {
+            "shape": (-1, 7, 68),
+            "features": np.loadtxt(os.path.join(
+                rootdir, "freesurfer_atlas-desikan_labels.txt"), dtype=str),
+            "channels": np.loadtxt(os.path.join(
+                rootdir, "freesurfer_channels.txt"), dtype=str)},
+        "destrieux_roi": {
+            "shape": (-1, 7, 148),
+            "features": np.loadtxt(os.path.join(
+                rootdir, "freesurfer_atlas-destrieux_labels.txt"), dtype=str),
+            "channels": np.loadtxt(os.path.join(
+                rootdir, "freesurfer_channels.txt"), dtype=str)},
+        "xhemi": {
+            "shape": (-1, 8, 163842),
+            "features": None,
+            "channels": np.loadtxt(os.path.join(
+                rootdir, "freesurfer_xhemi_channels.txt"), dtype=str)}
+    }
+
+    def default(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        raise TypeError("Not serializable")
+
+    with open(os.path.join(rootdir, "resources.json"), "wt") as of:
+        json.dump(data, of, indent=2, default=default)
+
+
+def convert_split(rootdir, name):
+    """ Convert the split and use subject index in table rather than subject
+    id.
+
+    Parameters
+    ----------
+    rootdir: str
+        root directory.
+    name: str
+        name of the generated file.
+    """
+    split_file = os.path.join(rootdir, "cv_splits.json")
+    with open(split_file, "rt") as of:
+        split_data = json.load(of)
+    desc_file = os.path.join(rootdir, "train.tsv")
+    df = pd.read_csv(desc_file, sep="\t")
+    print(df)
+    splits = {}
+    for fold_name, sets in split_data.items():
+        splits[fold_name] = {}
+        for set_name, subjects in sets.items():
+            print(fold_name, set_name, len(subjects))
+            for sid in subjects:
+                index = df[df["participant_id"] == sid].index.tolist()
+                assert len(index) == 1, sid
+                splits[fold_name].setdefault(set_name, []).append(index[0])
+    split_file = os.path.join(rootdir, "cv_splits_indices.json")
+    with open(split_file, "wt") as of:
+        json.dump(splits, of, indent=2)
+
+
 if __name__ == "__main__":
 
-    organize_data(rootdir="/neurospin/hc")
+    # organize_data(rootdir="/neurospin/hc")
+    # concat_datasets(
+    #     rootdir="/neurospin/hc/challengeBHB/public_data_challenge")
+    # concat_datasets(
+    #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge")
+    # compile_resources(
+    #     rootdir="/neurospin/hc/openBHB/resource")
+    convert_split(
+        rootdir="/neurospin/hc/challengeBHB/public_data_challenge",
+        name="public_cv_split")
+    # convert_split(
+    #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge",
+    #     name="private_cv_split")
