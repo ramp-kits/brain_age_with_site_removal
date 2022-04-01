@@ -535,6 +535,8 @@ class RegressionModel(metaclass=ABCMeta):
             returns predicted values.
         """
         self.model.eval()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
         dataset = Dataset(X, transforms=self.transforms, indices=self.indices)
         testloader = torch.utils.data.DataLoader(
             dataset, batch_size=self.batch_size, shuffle=False, num_workers=0)
@@ -542,11 +544,11 @@ class RegressionModel(metaclass=ABCMeta):
             outputs = []
             with progressbar.ProgressBar(max_value=len(testloader)) as bar:
                 for cnt, inputs in enumerate(testloader):
-                    inputs = inputs.float()
+                    inputs = inputs.float().to(device)
                     outputs.append(self.model(inputs))
                     bar.update(cnt)
             outputs = torch.cat(outputs, dim=0)
-        return outputs.numpy()
+        return outputs.detach().cpu().numpy()
 
 
 ############################################################################
