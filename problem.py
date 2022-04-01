@@ -30,6 +30,7 @@ from sklearn.model_selection import KFold
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import mean_absolute_error, balanced_accuracy_score
+from download_data import generate_random_data
 
 
 def combine_wrapper(wrapped_func):
@@ -459,10 +460,11 @@ def get_cv(X, y):
     """
     flag1 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
     flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_SMALL")
+    flag3 = os.environ.get("RAMP_TEST_MODE")
     folds = []
     folds_desc = []
     if ((flag1 is not None and flag1 == "on") or
-            (flag2 is not None and flag2 == "on")):
+            (flag2 is not None and flag2 == "on") or (flag3 is not None)):
         print("- kfold")
         cv_train = KFold(n_splits=5, shuffle=True, random_state=0)
         for cnt, (train_idx, test_idx) in enumerate(cv_train.split(X, y)):
@@ -513,16 +515,27 @@ def _read_data(path, dataset):
     y_arr: array (n_samples, )
         target data.
     """
-    print_title("Read {}...".format(dataset.upper()))
-    df = pd.read_csv(os.path.join(path, "data", dataset + ".tsv"), sep="\t")
-    df.loc[df["split"] == "external_test", "site"] = np.nan
-    y_arr = df[["age", "site"]].values
-    x_arr = np.load(os.path.join(path, "data", dataset + ".npy"),
-                    mmap_mode="r")
+    flag1 = os.environ.get("RAMP_TEST_MODE")
+    flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
+    if (flag1 is not None) or (flag2 is not None and flag2 == "on"):
+        print_title("Generate {}...".format(dataset.upper()))
+        x_arr, y_arr, split = generate_random_data(
+            dtype=dataset, n_samples=(30 if dataset == "train" else 10))
+        if dataset == "test":
+            y_arr = y_arr.astype(np.float32)
+            y_arr[np.asarray(split) == "external_test", 1] = np.nan
+    else:
+        print_title("Read {}...".format(dataset.upper()))
+        df = pd.read_csv(os.path.join(path, "data", dataset + ".tsv"),
+                         sep="\t")
+        df.loc[df["split"] == "external_test", "site"] = np.nan
+        y_arr = df[["age", "site"]].values
+        x_arr = np.load(os.path.join(path, "data", dataset + ".npy"),
+                        mmap_mode="r")
+        split = df["split"].values.tolist()
     print("- y size [original]:", y_arr.shape)
     print("- x size [original]:", x_arr.shape)
     if dataset == "test":
-        split = df["split"].values.tolist()
         key = "internal_" + dataset
         split.reverse()
         split_index = len(split) - split.index(key)
@@ -660,8 +673,9 @@ def make_multiclass(label_names=[]):
 problem_title = (
     "Brain age prediction and debiasing with site-effect removal in MRI "
     "through representation learning.")
-flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
-if flag is not None and flag == "on":
+flag1 = os.environ.get("RAMP_TEST_MODE")
+flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
+if (flag1 is not None) or (flag2 is not None and flag2 == "on"):
     print_title("Activate TEST mode...")
     _prediction_site_names = [0, 1]
     os.environ["RAMP_BRAIN_AGE_SITERM_NSITES"] = "2"
