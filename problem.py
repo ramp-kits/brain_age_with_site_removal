@@ -20,11 +20,9 @@ import pandas as pd
 import numpy as np
 import rampwf as rw
 from rampwf.prediction_types.base import BasePrediction
-import nibabel
 import multiprocessing
 from pprint import pprint
 from collections import OrderedDict
-from nilearn import plotting, datasets
 from rampwf.utils.pretty_print import print_title
 from sklearn.base import BaseEstimator
 from sklearn.utils import _safe_indexing
@@ -756,6 +754,9 @@ class DatasetHelper(object):
         return x_df
 
     def plot_data(self, data, sample_id, channel_id, hemi="left"):
+        import nibabel
+        from nilearn import plotting, datasets
+
         dtype = self._get_dtype(data.shape)
         if dtype in ("vbm", "quasiraw"):
             im = nibabel.Nifti1Image(data[sample_id, channel_id],

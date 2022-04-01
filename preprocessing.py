@@ -218,7 +218,7 @@ def compile_resources(rootdir):
         json.dump(data, of, indent=2, default=default)
 
 
-def convert_split(rootdir, name):
+def convert_split(rootdir):
     """ Convert the split and use subject index in table rather than subject
     id.
 
@@ -226,8 +226,6 @@ def convert_split(rootdir, name):
     ----------
     rootdir: str
         root directory.
-    name: str
-        name of the generated file.
     """
     split_file = os.path.join(rootdir, "cv_splits.json")
     with open(split_file, "rt") as of:
@@ -258,9 +256,7 @@ if __name__ == "__main__":
     #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge")
     # compile_resources(
     #     rootdir="/neurospin/hc/openBHB/resource")
-    convert_split(
-        rootdir="/neurospin/hc/challengeBHB/public_data_challenge",
-        name="public_cv_split")
     # convert_split(
-    #     rootdir="/neurospin/hc/challengeBHB/private_data_challenge",
-    #     name="private_cv_split")
+    #     rootdir="/neurospin/hc/challengeBHB/public_data_challenge")
+    convert_split(
+        rootdir="/neurospin/hc/challengeBHB/private_data_challenge")
