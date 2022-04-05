@@ -23,7 +23,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install flake8 nbconvert[test]
-        pip install click==8.0.4
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Test
       run: |
