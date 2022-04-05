@@ -420,9 +420,8 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
         self.precision = precision
         self.score_type_ext_mae_age = ExtMAE(name="ext_mae_age", precision=3)
 
-    def score_function(self, ground_truths_combined, predictions_combined,
-                       valid_indexes=None):
-        print_title("DeepDebiasingMetric: {}".format(valid_indexes is None))
+    def score_function(self, ground_truths_combined, predictions_combined):
+        print_title("DeepDebiasingMetric")
         scores = {}
         split_idx = None
         for score_type, ground_truths, predictions in zip(
@@ -431,16 +430,13 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
                 predictions_combined.predictions_list):
             _predictions = predictions.y_pred
             _ground_truths = ground_truths.y_pred
-            if valid_indexes is not None:
-                _predictions = _safe_indexing(_predictions, valid_indexes)
-                _ground_truths = _safe_indexing(_ground_truths, valid_indexes)
             print("- set:", _predictions.shape, "-", _ground_truths.shape)
             dtype, split_idx = get_set_info(len(_ground_truths))
             if dtype == "test" and _ground_truths.shape[1] == 1:
                 scores[self.score_type_ext_mae_age.name] = (
                     self.score_type_ext_mae_age(_ground_truths, _predictions))
             scores[score_type.name] = score_type.score_function(
-                ground_truths, predictions, valid_indexes)
+                ground_truths, predictions)
         pprint(scores)
         # TODO: don't comput the first part of the loss if numerical issues
         if "ext_mae_age" not in scores:
