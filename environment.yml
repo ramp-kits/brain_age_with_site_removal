@@ -2,6 +2,7 @@ name: ramp-brainage-siterm
 channels:
   - conda-forge
 dependencies:
+  - click<8.1.0
   - scipy
   - numpy
   - nibabel

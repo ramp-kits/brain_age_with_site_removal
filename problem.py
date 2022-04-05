@@ -30,7 +30,6 @@ from sklearn.model_selection import KFold
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import mean_absolute_error, balanced_accuracy_score
-from download_data import generate_random_data
 
 
 def combine_wrapper(wrapped_func):
@@ -801,3 +800,60 @@ class DatasetHelper(object):
             raise ValueError("The input data does not correspond to a valid "
                              "dataset.")
         return dtype
+
+
+def generate_random_data(dtype, n_samples, rootdir=None):
+    """ Generate random data.
+
+    The test set is composed of data with the same sites as in the
+    train set (internal dataset) and data with unseen sites during the
+    training (external dataset).
+    The first line contains the split index and nans.
+
+    Parameters
+    ----------
+    dtype: str
+        the datasset type: 'train' or'test'.
+    n_samples: int
+        the number of generated samples.
+    rootdir: str, default None
+        the data location.
+
+    Returns
+    -------
+    x_arr: array (n_samples, n_features)
+        input data.
+    y_arr: array (n_samples, 2)
+        target data.
+    split: list of str
+        the split name, returned only if 'rootdir' is None.
+    """
+    x_arrs, y_arrs = [], []
+    if dtype == "test":
+        dtypes = ["internal_test", "external_test"]
+    else:
+        dtypes = ["internal_train"]
+    split_info = []
+    for name in dtypes:
+        x_arr = np.random.rand(n_samples, 3659572)
+        df = pd.DataFrame(data=np.arange(n_samples), columns=["samples"])
+        df["age"] = np.random.randint(5, 80, n_samples)
+        if name == "external_test":
+            df["site"] = 3
+        else:
+            df["site"] = np.random.randint(0, 2, n_samples)
+        y_arr = df[["age", "site"]].values
+        split_info.extend([name] * len(y_arr))
+        x_arrs.append(x_arr)
+        y_arrs.append(y_arr)
+    x_arr = np.concatenate(x_arrs, axis=0)
+    y_arr = np.concatenate(y_arrs, axis=0)
+    df = pd.DataFrame(y_arr, columns=("age", "site"))
+    df["split"] = split_info
+    if rootdir is not None:
+        np.save(os.path.join(rootdir, dtype + ".npy"),
+                x_arr.astype(np.float32))
+        df.to_csv(os.path.join(rootdir, dtype + ".tsv"), sep="\t", index=False)
+        return x_arr, y_arr
+    else:
+        return x_arr, y_arr, split_info
