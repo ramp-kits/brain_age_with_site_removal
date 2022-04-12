@@ -353,7 +353,7 @@ class ExtMAE(rw.score_types.BaseScoreType):
             _, y_true_external = split_data(y_true, split_idx)
         else:
             # TODO: use internal set if numerical issues
-            return np.nan
+            return 0 # np.nan
             y_pred_external = y_pred
             y_true_external = y_true
         return mean_absolute_error(y_true_external, y_pred_external)
@@ -440,7 +440,7 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
         pprint(scores)
         # TODO: don't comput the first part of the loss if numerical issues
         if "ext_mae_age" not in scores:
-            return np.nan
+            return 0 # np.nan
         metric = (
             scores.get("ext_mae_age", 0) * scores["bacc_site"] +
             (1. / self.n_sites) * scores["mae_age"])
@@ -470,7 +470,7 @@ def get_cv(X, y):
                 "internal_test": len(test_idx),
                 "external_test": 0})
             folds.append((np.asarray(train_idx), np.asarray(test_idx)))
-            if cnt == 0:
+            if cnt == 2:
                 break
     else:
         print("- fixed stratified")
