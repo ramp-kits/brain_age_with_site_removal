@@ -470,7 +470,7 @@ def get_cv(X, y):
                 "internal_test": len(test_idx),
                 "external_test": 0})
             folds.append((np.asarray(train_idx), np.asarray(test_idx)))
-            if cnt == 0:
+            if cnt == 2:
                 break
     else:
         print("- fixed stratified")
