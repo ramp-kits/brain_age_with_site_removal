@@ -1,3 +1,4 @@
+click<8.1.0
 numpy
 scipy
 nibabel
@@ -9,4 +10,4 @@ seaborn
 jupyter
 progressbar2
 torch
-ramp-workflow
+ramp-workflow>=0.5

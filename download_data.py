@@ -55,7 +55,7 @@ def fetch_data(basenames, rootdir, base_url, verbose=1):
     return downloaded
 
 
-def generate_random_data(rootdir, dtype, n_samples):
+def generate_random_data(dtype, n_samples, rootdir=None):
     """ Generate random data.
 
     The test set is composed of data with the same sites as in the
@@ -65,12 +65,12 @@ def generate_random_data(rootdir, dtype, n_samples):
 
     Parameters
     ----------
-    rootdir: str
-        the data location.
     dtype: str
         the datasset type: 'train' or'test'.
     n_samples: int
         the number of generated samples.
+    rootdir: str, default None
+        the data location.
 
     Returns
     -------
@@ -78,6 +78,8 @@ def generate_random_data(rootdir, dtype, n_samples):
         input data.
     y_arr: array (n_samples, 2)
         target data.
+    split: list of str
+        the split name, returned only if 'rootdir' is None.
     """
     x_arrs, y_arrs = [], []
     if dtype == "test":
@@ -101,9 +103,13 @@ def generate_random_data(rootdir, dtype, n_samples):
     y_arr = np.concatenate(y_arrs, axis=0)
     df = pd.DataFrame(y_arr, columns=("age", "site"))
     df["split"] = split_info
-    np.save(os.path.join(rootdir, dtype + ".npy"), x_arr.astype(np.float32))
-    df.to_csv(os.path.join(rootdir, dtype + ".tsv"), sep="\t", index=False)
-    return x_arr, y_arr
+    if rootdir is not None:
+        np.save(os.path.join(rootdir, dtype + ".npy"),
+                x_arr.astype(np.float32))
+        df.to_csv(os.path.join(rootdir, dtype + ".tsv"), sep="\t", index=False)
+        return x_arr, y_arr
+    else:
+        return x_arr, y_arr, split_info
 
 
 if __name__ == "__main__":

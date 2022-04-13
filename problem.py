@@ -20,11 +20,9 @@ import pandas as pd
 import numpy as np
 import rampwf as rw
 from rampwf.prediction_types.base import BasePrediction
-import nibabel
 import multiprocessing
 from pprint import pprint
 from collections import OrderedDict
-from nilearn import plotting, datasets
 from rampwf.utils.pretty_print import print_title
 from sklearn.base import BaseEstimator
 from sklearn.utils import _safe_indexing
@@ -355,7 +353,7 @@ class ExtMAE(rw.score_types.BaseScoreType):
             _, y_true_external = split_data(y_true, split_idx)
         else:
             # TODO: use internal set if numerical issues
-            return np.nan
+            return 0.  # np.nan
             y_pred_external = y_pred
             y_true_external = y_true
         return mean_absolute_error(y_true_external, y_pred_external)
@@ -422,9 +420,8 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
         self.precision = precision
         self.score_type_ext_mae_age = ExtMAE(name="ext_mae_age", precision=3)
 
-    def score_function(self, ground_truths_combined, predictions_combined,
-                       valid_indexes=None):
-        print_title("DeepDebiasingMetric: {}".format(valid_indexes is None))
+    def score_function(self, ground_truths_combined, predictions_combined):
+        print_title("DeepDebiasingMetric")
         scores = {}
         split_idx = None
         for score_type, ground_truths, predictions in zip(
@@ -433,20 +430,17 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
                 predictions_combined.predictions_list):
             _predictions = predictions.y_pred
             _ground_truths = ground_truths.y_pred
-            if valid_indexes is not None:
-                _predictions = _safe_indexing(_predictions, valid_indexes)
-                _ground_truths = _safe_indexing(_ground_truths, valid_indexes)
             print("- set:", _predictions.shape, "-", _ground_truths.shape)
             dtype, split_idx = get_set_info(len(_ground_truths))
             if dtype == "test" and _ground_truths.shape[1] == 1:
                 scores[self.score_type_ext_mae_age.name] = (
                     self.score_type_ext_mae_age(_ground_truths, _predictions))
             scores[score_type.name] = score_type.score_function(
-                ground_truths, predictions, valid_indexes)
+                ground_truths, predictions)
         pprint(scores)
         # TODO: don't comput the first part of the loss if numerical issues
         if "ext_mae_age" not in scores:
-            return np.nan
+            return 0.  # np.nan
         metric = (
             scores.get("ext_mae_age", 0) * scores["bacc_site"] +
             (1. / self.n_sites) * scores["mae_age"])
@@ -461,10 +455,11 @@ def get_cv(X, y):
     """
     flag1 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
     flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_SMALL")
+    flag3 = os.environ.get("RAMP_TEST_MODE")
     folds = []
     folds_desc = []
     if ((flag1 is not None and flag1 == "on") or
-            (flag2 is not None and flag2 == "on")):
+            (flag2 is not None and flag2 == "on") or (flag3 is not None)):
         print("- kfold")
         cv_train = KFold(n_splits=5, shuffle=True, random_state=0)
         for cnt, (train_idx, test_idx) in enumerate(cv_train.split(X, y)):
@@ -475,7 +470,7 @@ def get_cv(X, y):
                 "internal_test": len(test_idx),
                 "external_test": 0})
             folds.append((np.asarray(train_idx), np.asarray(test_idx)))
-            if cnt == 0:
+            if cnt == 2:
                 break
     else:
         print("- fixed stratified")
@@ -515,16 +510,27 @@ def _read_data(path, dataset):
     y_arr: array (n_samples, )
         target data.
     """
-    print_title("Read {}...".format(dataset.upper()))
-    df = pd.read_csv(os.path.join(path, "data", dataset + ".tsv"), sep="\t")
-    df.loc[df["split"] == "external_test", "site"] = np.nan
-    y_arr = df[["age", "site"]].values
-    x_arr = np.load(os.path.join(path, "data", dataset + ".npy"),
-                    mmap_mode="r")
+    flag1 = os.environ.get("RAMP_TEST_MODE")
+    flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
+    if (flag1 is not None) or (flag2 is not None and flag2 == "on"):
+        print_title("Generate {}...".format(dataset.upper()))
+        x_arr, y_arr, split = generate_random_data(
+            dtype=dataset, n_samples=(30 if dataset == "train" else 10))
+        if dataset == "test":
+            y_arr = y_arr.astype(np.float32)
+            y_arr[np.asarray(split) == "external_test", 1] = np.nan
+    else:
+        print_title("Read {}...".format(dataset.upper()))
+        df = pd.read_csv(os.path.join(path, "data", dataset + ".tsv"),
+                         sep="\t")
+        df.loc[df["split"] == "external_test", "site"] = np.nan
+        y_arr = df[["age", "site"]].values
+        x_arr = np.load(os.path.join(path, "data", dataset + ".npy"),
+                        mmap_mode="r")
+        split = df["split"].values.tolist()
     print("- y size [original]:", y_arr.shape)
     print("- x size [original]:", x_arr.shape)
     if dataset == "test":
-        split = df["split"].values.tolist()
         key = "internal_" + dataset
         split.reverse()
         split_index = len(split) - split.index(key)
@@ -662,8 +668,9 @@ def make_multiclass(label_names=[]):
 problem_title = (
     "Brain age prediction and debiasing with site-effect removal in MRI "
     "through representation learning.")
-flag = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
-if flag is not None and flag == "on":
+flag1 = os.environ.get("RAMP_TEST_MODE")
+flag2 = os.environ.get("RAMP_BRAIN_AGE_SITERM_TEST")
+if (flag1 is not None) or (flag2 is not None and flag2 == "on"):
     print_title("Activate TEST mode...")
     _prediction_site_names = [0, 1]
     os.environ["RAMP_BRAIN_AGE_SITERM_NSITES"] = "2"
@@ -756,6 +763,9 @@ class DatasetHelper(object):
         return x_df
 
     def plot_data(self, data, sample_id, channel_id, hemi="left"):
+        import nibabel
+        from nilearn import plotting, datasets
+
         dtype = self._get_dtype(data.shape)
         if dtype in ("vbm", "quasiraw"):
             im = nibabel.Nifti1Image(data[sample_id, channel_id],
@@ -786,3 +796,60 @@ class DatasetHelper(object):
             raise ValueError("The input data does not correspond to a valid "
                              "dataset.")
         return dtype
+
+
+def generate_random_data(dtype, n_samples, rootdir=None):
+    """ Generate random data.
+
+    The test set is composed of data with the same sites as in the
+    train set (internal dataset) and data with unseen sites during the
+    training (external dataset).
+    The first line contains the split index and nans.
+
+    Parameters
+    ----------
+    dtype: str
+        the datasset type: 'train' or'test'.
+    n_samples: int
+        the number of generated samples.
+    rootdir: str, default None
+        the data location.
+
+    Returns
+    -------
+    x_arr: array (n_samples, n_features)
+        input data.
+    y_arr: array (n_samples, 2)
+        target data.
+    split: list of str
+        the split name, returned only if 'rootdir' is None.
+    """
+    x_arrs, y_arrs = [], []
+    if dtype == "test":
+        dtypes = ["internal_test", "external_test"]
+    else:
+        dtypes = ["internal_train"]
+    split_info = []
+    for name in dtypes:
+        x_arr = np.random.rand(n_samples, 3659572)
+        df = pd.DataFrame(data=np.arange(n_samples), columns=["samples"])
+        df["age"] = np.random.randint(5, 80, n_samples)
+        if name == "external_test":
+            df["site"] = 3
+        else:
+            df["site"] = np.random.randint(0, 2, n_samples)
+        y_arr = df[["age", "site"]].values
+        split_info.extend([name] * len(y_arr))
+        x_arrs.append(x_arr)
+        y_arrs.append(y_arr)
+    x_arr = np.concatenate(x_arrs, axis=0)
+    y_arr = np.concatenate(y_arrs, axis=0)
+    df = pd.DataFrame(y_arr, columns=("age", "site"))
+    df["split"] = split_info
+    if rootdir is not None:
+        np.save(os.path.join(rootdir, dtype + ".npy"),
+                x_arr.astype(np.float32))
+        df.to_csv(os.path.join(rootdir, dtype + ".tsv"), sep="\t", index=False)
+        return x_arr, y_arr
+    else:
+        return x_arr, y_arr, split_info
