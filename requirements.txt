@@ -9,5 +9,5 @@ matplotlib
 seaborn
 jupyter
 progressbar2
-torch
+tensorflow-gpu
 ramp-workflow>=0.5
