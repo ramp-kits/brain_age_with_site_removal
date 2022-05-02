@@ -1,5 +1,6 @@
 name: ramp-brainage-siterm
 channels:
+  - pytorch
   - conda-forge
 dependencies:
   - click<8.1.0
