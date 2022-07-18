@@ -87,7 +87,7 @@ class DeepDebiasingEstimator(rw.workflows.SKLearnPipeline):
         submission_module = rw.utils.importing.import_module_from_source(
             os.path.join(module_path, self.filename),
             os.path.splitext(self.filename)[0],
-            sanitize=False
+            sanitize=True
         )
         fold = int(os.environ.get("RAMP_BRAIN_AGE_SITERM_FOLD", -1))
         fold += 1
