@@ -8,7 +8,7 @@
 # Brain age prediction with site-effect removal
 
 This [challenge](https://baobablab.github.io/bhb/challenges/age_prediction_with_site_removal) uses the [openBHB dataset](https://ieee-dataport.org/open-access/openbhb-multi-site-brain-mri-dataset-age-prediction-and-debiasing) and aims to i) predict age from derived data from 3D T1 anatomical MRI while ii) removing site information from the learned representation. Thus, we aim to compare the capacity of proposed models to encode a relevant representation of the data (feature extraction and dimensionality reduction) that preserve the biological variability associated with age while removing the site-specific information. The algorithms submitted must be written in a [PyTorch](https://pytorch.org)-style and output a low-dimension features vector (p < 10000). Derived data are composed of Quasi-Raw, VBM, and SBM.<br><br>
-You can check out our Jupyter Notebook for a concrete example: https://ramp.studio/problems/brain_age_with_site_removal_open_2022
+You can check out our Jupyter Notebook for a concrete example: https://ramp.studio/problems/brain_age_with_site_removal
 
 
 ## Data Organization
