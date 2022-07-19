@@ -23,8 +23,9 @@ jobs:
       - name: Conda install environment.yml
         run: mamba env create -f environment.yml -n test_env
       - name: set test_env env
-        run: conda activate test_env
-    
+        run: |
+          conda init bash
+          conda activate test_env
       - name: Info Conda
         run: |
           conda info
