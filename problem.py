@@ -442,8 +442,8 @@ class DeepDebiasingMetric(rw.score_types.BaseScoreType):
         if "ext_mae_age" not in scores:
             return 0.  # np.nan
         metric = (
-            scores.get("ext_mae_age", 0) * scores["bacc_site"] +
-            (1. / self.n_sites) * scores["mae_age"])
+            scores.get("ext_mae_age", 0) * scores["bacc_site"]**0.3 +
+            (1. / self.n_sites)**0.3 * scores["mae_age"])
         return metric
 
     def __call__(self, y_true, y_pred):
